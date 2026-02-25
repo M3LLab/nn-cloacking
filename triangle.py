@@ -6,6 +6,12 @@ The transformation is defined by a piecewise linear function F(x) that maps the
 physical coordinates to virtual coordinates. The effective material properties are
 computed using the standard transformation elastodynamics formulas, and then
 used in a frequency-domain FEM problem to solve for the displacement field u.
+
+frequency-domain elastodynamics equation with source f_ext:
+K·u − ω²M·u − f_ext = 0
+
+JAX-FEM's weak-form residual is:
+R(u; v) = ∫_Ω σ(u):ε(v) dΩ  +  ∫_Ω mass_map(u)·v dΩ  +  ∫_Γ surface_map(u,x)·v dΓ  = 0
 """
 
 import jax
@@ -112,8 +118,6 @@ def rho_eff(x):
     F = F_tensor(x)
     J = jnp.linalg.det(F)
     return rho0 / J
-
-
 
 # --------------------------
 # Incident wave (Rayleigh wave surface point source)
