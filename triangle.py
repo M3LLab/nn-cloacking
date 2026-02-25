@@ -52,7 +52,7 @@ c = 0.309 * H / 2.0
 # 2. Mesh
 # ---------------------------
 
-nx, ny = 400, 1200
+nx, ny = 400, 131
 meshio_mesh = rectangle_mesh(nx, ny, W, H)
 mesh = Mesh(meshio_mesh.points, meshio_mesh.cells_dict['quad'], ele_type='QUAD4')
 
@@ -206,7 +206,7 @@ problem = RayleighCloakProblem(
 # 7. Solve
 # ---------------------------
 
-sol_list = solver(problem)
+sol_list = solver(problem, solver_options={'umfpack_solver': {}})
 u = sol_list[0]
 
 # ---------------------------
