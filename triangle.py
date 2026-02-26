@@ -36,7 +36,7 @@ nu = lam / (2*(lam+mu))
 cR = cs * (0.826 + 1.14*nu)/(1+nu)
 
 # Normalized frequency f*
-f_star = 2.0
+f_star = 1.0
 lambda_star = 1.0
 omega = 2*np.pi * f_star * cR / lambda_star
 
@@ -47,6 +47,7 @@ W = 12.5 * lambda_star
 a = 0.0774 * H
 b = 3*a
 c = 0.309 * H / 2.0
+x_c = W / 2.0              # horizontal centre of the cloak
 
 # ---------------------------
 # 2. Mesh
@@ -60,15 +61,37 @@ mesh = Mesh(meshio_mesh.points, meshio_mesh.cells_dict['quad'], ele_type='QUAD4'
 # 3. Triangular transform F
 # ---------------------------
 
+def _in_cloak(x):
+    """True inside the cloak annulus between the inner (z1) and outer (z2) V-boundaries.
+
+    Both boundaries meet the free surface at |x1 - x_c| = c and narrow with depth.
+    Outer depth: d2(x) = b*(1 - |x1-xc|/c)
+    Inner depth: d1(x) = a*(1 - |x1-xc|/c)
+    Cloak region: d1 <= depth <= d2  (widest at surface, apex pointing down).
+    """
+    depth = H - x[1]
+    r = jnp.abs(x[0] - x_c) / c        # normalised lateral distance, 0..1 at surface
+    d2 = b * (1.0 - r)                  # outer boundary depth
+    d1 = a * (1.0 - r)                  # inner boundary depth
+    return (r <= 1.0) & (depth >= d1) & (depth <= d2)
+
+def _in_defect(x):
+    """True inside the inner void region that the cloak conceals (0 <= depth <= d1)."""
+    depth = H - x[1]
+    r = jnp.abs(x[0] - x_c) / c
+    d1 = a * (1.0 - r)
+    return (r <= 1.0) & (depth >= 0.0) & (depth <= d1)
+
 def F_tensor(x):
     x1 = x[0]
-    sign = jnp.sign(x1)
+    sign = jnp.sign(x1 - x_c)          # sign relative to cloak centre
     F21 = sign * a / c
     F22 = (b - a) / b
 
-    F = jnp.array([[1.0, 0.0],
-                   [F21, F22]])
-    return F
+    F_cloak = jnp.array([[1.0, 0.0],
+                          [F21, F22]])
+    # return identity (original material) outside the cloak region
+    return jnp.where(_in_cloak(x), F_cloak, jnp.eye(2))
 
 # ---------------------------
 # 4. Effective tensor
@@ -90,34 +113,32 @@ def C_iso():
 
 C0 = C_iso()
 
+_eps_void = 1e-4   # near-zero stiffness/density scaling for the defect cavity
+
 def C_eff(x):
     F = F_tensor(x)
     J = jnp.linalg.det(F)
 
-    Cnew = jnp.zeros((2,2,2,2))
-    for i in range(2):
-        for j in range(2):
-            for k in range(2):
-                for l in range(2):
-                    val = 0.0
-                    for I in range(2):
-                        for Jidx in range(2):
-                            for K in range(2):
-                                for L in range(2):
-                                    val += (1/J
-                                            * C0[I,Jidx,K,L]
-                                            * F[i,I]
-                                            * F[k,K])
-                    Cnew = Cnew.at[i,j,k,l].set(val)
+    # Cosserat transformed tensor: C'[i,j,k,l] = (1/J) * F[i,I] * F[k,K] * C0[I,j,K,l]
+    Cnew = jnp.einsum('iI,kK,IjKl->ijkl', F, F, C0) / J
 
-    # arithmetic symmetrization
-    Csym = 0.5*(Cnew + jnp.transpose(Cnew,(1,0,2,3)))
-    return Csym
+    # Full Cauchy symmetrization: average over all 4 minor-index permutations.
+    # Enforces both minor symmetries and preserves the major symmetry of Cnew.
+    Csym = (Cnew
+            + jnp.transpose(Cnew, (1, 0, 2, 3))   # swap i↔j
+            + jnp.transpose(Cnew, (0, 1, 3, 2))   # swap k↔l
+            + jnp.transpose(Cnew, (1, 0, 3, 2))   # swap both
+           ) / 4.0
+
+    C_void = _eps_void * C0
+    return jnp.where(_in_defect(x), C_void, jnp.where(_in_cloak(x), Csym, C0))
 
 def rho_eff(x):
     F = F_tensor(x)
     J = jnp.linalg.det(F)
-    return rho0 / J
+    rho_cloak = rho0 / J
+    rho_void = _eps_void * rho0
+    return jnp.where(_in_defect(x), rho_void, jnp.where(_in_cloak(x), rho_cloak, rho0))
 
 # --------------------------
 # Incident wave (Rayleigh wave surface point source)
@@ -157,7 +178,8 @@ class RayleighCloakProblem(Problem):
         # tensor_map(u_grad, *internal_vars_at_quad) -> stress
         # Called via vmap over quads; u_grad shape: (vec, dim) = (2, 2)
         def stress(u_grad, C_at_quad, _rho_at_quad):
-            strain = 0.5 * (u_grad + u_grad.T)
+            # strain = 0.5 * (u_grad + u_grad.T)
+            strain = u_grad
             return jnp.einsum('ijkl,kl->ij', C_at_quad, strain)
         return stress
 
@@ -226,6 +248,9 @@ plt.tricontourf(mesh.points[:,0],
                 mesh.points[:,1],
                 mag,
                 levels=100)
+# mark source point with a red star
+plt.plot(x_src, H, 'r*', markersize=20)
 plt.colorbar()
-plt.title("Symmetrized Triangular Cloak (f*=2)")
+plt.title(f"Symmetrized Triangular Cloak (f*={f_star})")
 plt.savefig(f"output/cloak_solution_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png", dpi=300)
+print("Plot saved to", f"output/cloak_solution_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
