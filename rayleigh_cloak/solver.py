@@ -242,6 +242,7 @@ def solve_optimization(config: SimulationConfig, step_callback=None) -> Optimiza
     # Per-step displacement plot callback
     pts_x = np.asarray(cloak_mesh.points[:, 0])
     pts_y = np.asarray(cloak_mesh.points[:, 1])
+    cloak_cells = np.asarray(cloak_mesh.cells)
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
@@ -249,7 +250,8 @@ def solve_optimization(config: SimulationConfig, step_callback=None) -> Optimiza
         plot_displacement_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
-            title=f"|Re(u)| — step {step}",
+            title=f"|u| — step {step}",
+            cells=cloak_cells,
         )
 
     opt_cfg = config.optimization
@@ -348,6 +350,7 @@ def solve_optimization_neural(
 
     pts_x = np.asarray(cloak_mesh.points[:, 0])
     pts_y = np.asarray(cloak_mesh.points[:, 1])
+    cloak_cells = np.asarray(cloak_mesh.cells)
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
@@ -355,7 +358,8 @@ def solve_optimization_neural(
         plot_displacement_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
-            title=f"|Re(u)| — step {step}",
+            title=f"|u| — step {step}",
+            cells=cloak_cells,
         )
 
     opt_cfg = config.optimization
@@ -652,6 +656,7 @@ def solve_optimization_neural_topo(
 
     pts_x = np.asarray(cloak_mesh.points[:, 0])
     pts_y = np.asarray(cloak_mesh.points[:, 1])
+    cloak_cells = np.asarray(cloak_mesh.cells)
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
@@ -659,7 +664,8 @@ def solve_optimization_neural_topo(
         plot_displacement_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
-            title=f"|Re(u)| — step {step}",
+            title=f"|u| — step {step}",
+            cells=cloak_cells,
         )
 
     # Density visualisation: cloak mask reshaped to 2D for overlay

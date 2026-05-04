@@ -454,11 +454,13 @@ def plot_displacement_field(
     pts_y: np.ndarray,
     params,
     save_path: str,
-    title: str = "|Re(u)|",
+    title: str = "|u|",
     percentile: float = 95,
     norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
 ) -> None:
-    """Plot |Re(u)| in the physical domain and save to *save_path*.
+    """Plot the phase-invariant complex magnitude
+    ``|U| = sqrt(|U_x|^2 + |U_y|^2)`` in the physical domain.
 
     Parameters
     ----------
@@ -466,9 +468,17 @@ def plot_displacement_field(
     pts_x, pts_y : node coordinates
     params : DerivedParams (for domain extents and cloak geometry)
     save_path : output PNG path
+    cells : (n_cells, 3) int, optional
+        Triangle connectivity of the (sub-)mesh.  When provided, the
+        plot uses this triangulation instead of letting matplotlib
+        Delaunay-triangulate the points — required to preserve the
+        cut-out cloak void as a hole rather than filling it in.
     """
-    re_ux, re_uy = u[:, 0], u[:, 1]
-    re_mag = np.sqrt(re_ux ** 2 + re_uy ** 2)
+    import matplotlib.tri as mtri
+
+    # Phase-invariant magnitude of the complex displacement vector.
+    full_mag = np.sqrt(u[:, 0] ** 2 + u[:, 1] ** 2
+                       + u[:, 2] ** 2 + u[:, 3] ** 2)
 
     x_off, y_off = params.x_off, params.y_off
     W, H = params.W, params.H
@@ -479,14 +489,26 @@ def plot_displacement_field(
 
     px = pts_x[phys] - x_off
     py = pts_y[phys] - y_off
-    pv = re_mag[phys]
+    pv = full_mag[phys]
 
     vmin_v = np.percentile(pv, 100 - percentile)
     vmax_v = np.percentile(pv, percentile)
     norm = _build_norm(norm_type, vmin_v, vmax_v, mid=0.25 * vmax_v)
 
+    if cells is not None:
+        # Re-index the connectivity into the physical-domain submask so the
+        # cut-out cloak void is preserved as a hole.
+        cells = np.asarray(cells)
+        new_index = -np.ones(pts_x.shape[0], dtype=np.int64)
+        new_index[np.where(phys)[0]] = np.arange(int(phys.sum()))
+        cell_keep = phys[cells].all(axis=1)
+        triang = mtri.Triangulation(px, py, new_index[cells[cell_keep]])
+        tri_arg = (triang,)
+    else:
+        tri_arg = (px, py)
+
     fig, ax = plt.subplots(figsize=(13, 4))
-    tc = ax.tricontourf(px, py, pv, levels=100, cmap='RdBu_r', norm=norm)
+    tc = ax.tricontourf(*tri_arg, pv, levels=100, cmap='RdBu_r', norm=norm)
 
     # Source marker
     ax.plot(params.x_src - x_off, H, 'r*', markersize=12)
@@ -499,7 +521,7 @@ def plot_displacement_field(
     ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - a, H],
             ls='--', color='yellow', lw=1.2)
 
-    fig.colorbar(tc, ax=ax, shrink=0.8, label='|Re(u)|')
+    fig.colorbar(tc, ax=ax, shrink=0.8, label='|u|')
     ax.set_title(title)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
