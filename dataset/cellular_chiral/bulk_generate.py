@@ -3,11 +3,12 @@
 Stores all structures in one contiguous memmapped .npy plus a sidecar of the
 per-sample live_fraction values. No PNGs are produced.
 
-    python -m dataset.cellular_chiral.bulk_generate -n 1000000 -o output/ca_bulk_squared
+    python -m dataset.cellular_chiral.bulk_generate -n 1000000 -o output/ca_bulk_squared --assembly squared
 """
 from __future__ import annotations
 
 import argparse
+import functools
 import multiprocessing as mp
 from pathlib import Path
 
@@ -27,19 +28,20 @@ def _init_worker(live_fractions: np.ndarray, base_seed: int) -> None:
     _BASE_SEED = base_seed
 
 
-def _generate_one(idx: int):
+def _generate_one(idx: int, assembly: str) -> tuple[int, np.ndarray]:
     lf = float(_LF[idx])
     cell, _ = generate_unit_cell(
         config=CAConfig(live_fraction=lf),
         seed=_BASE_SEED + idx,
-        assembly="squared",
+        assembly=assembly,
     )
     return idx, cell.astype(np.uint8)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bulk CA unit-cell generator (squared)")
+    parser = argparse.ArgumentParser(description="Bulk CA unit-cell generator")
     parser.add_argument("-n", "--num", type=int, default=1_000_000, help="Number of cells")
+    parser.add_argument("--assembly", type=str, default="squared", help="Assembly type (chiral or squared). Default is squared.")
     parser.add_argument("-s", "--seed", type=int, default=0, help="Base RNG seed")
     parser.add_argument("-o", "--output", type=Path, default=Path("output/ca_bulk_squared"))
     parser.add_argument("--lf-min", type=float, default=0.20, help="Min live_fraction")
@@ -57,7 +59,7 @@ def main() -> None:
 
     probe, _ = generate_unit_cell(
         config=CAConfig(live_fraction=float(live_fractions[0])),
-        seed=args.seed, assembly="squared",
+        seed=args.seed, assembly=args.assembly,
     )
     H, W = probe.shape
 
@@ -80,7 +82,7 @@ def main() -> None:
         initargs=(live_fractions, args.seed),
     ) as pool:
         for idx, cell in tqdm(
-            pool.imap_unordered(_generate_one, range(args.num), chunksize=chunksize),
+            pool.imap_unordered(functools.partial(_generate_one, assembly=args.assembly), range(args.num), chunksize=chunksize),
             total=args.num, desc="generate", unit="cell",
         ):
             cells[idx] = cell
