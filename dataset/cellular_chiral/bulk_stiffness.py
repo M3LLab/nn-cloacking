@@ -2,8 +2,14 @@
 
 Reads ``cells.npy`` and ``live_fractions.npy`` produced by
 ``dataset.cellular_chiral.bulk_generate``, runs FEM homogenization on every
-unique cell, and writes Lamé parameters (lambda, mu), effective density,
-the full augmented Voigt stiffness, and the binary geometry to one HDF5 file.
+unique cell, and writes the three independent D4-class stiffness parameters
+(C11, C12, C66) plus effective density, the full augmented Voigt stiffness,
+and the binary geometry to one HDF5 file.
+
+The fields ``lambda_`` and ``mu`` are also written for backward compatibility
+with older readers; they alias ``C12`` and ``C66`` respectively. Be aware
+those names assume isotropy that does NOT hold for generic D4 cells -- use
+``C11/C12/C66`` directly when you need the full elastic response.
 
 Identical and "really similar" geometries are filtered out: a cell is skipped
 if its raw bytes (exact match) or its block-pooled fingerprint (near-duplicate
@@ -74,12 +80,19 @@ _LOAD_CASES = [
 ]
 
 
-def _compute_stiffness(pixel_image: np.ndarray) -> tuple[np.ndarray, float, float]:
+def _compute_stiffness(
+    pixel_image: np.ndarray,
+    rho_solid: float = RHO_CEMENT,
+) -> tuple[np.ndarray, float, float]:
     """Run periodic FEM homogenization on a single (N, N) pixel image.
 
     Mirrors ``dataset.stiffness.calc_fem.compute_effective_stiffness`` but
     accepts the array directly so we don't round-trip through a temp file.
     Returns (C_eff (4x4 augmented Voigt), rho_eff, volume_fraction).
+
+    ``rho_solid`` is the density of the solid phase used to compute the
+    effective density ``rho_eff = vf * rho_solid``. Defaults to RHO_CEMENT
+    for back-compat with the original pipeline.
     """
     N = pixel_image.shape[0]
     assert pixel_image.shape == (N, N), f"expected square image, got {pixel_image.shape}"
@@ -115,24 +128,29 @@ def _compute_stiffness(pixel_image: np.ndarray) -> tuple[np.ndarray, float, floa
         C_eff[2, col] = float(avg_stress[0, 1])
         C_eff[3, col] = float(avg_stress[1, 0])
 
-    rho_eff = vf * RHO_CEMENT
+    rho_eff = vf * rho_solid
     return C_eff, rho_eff, vf
 
 
-def _lame_from_C(C: np.ndarray) -> tuple[float, float]:
-    """Extract effective isotropic-style Lamé parameters from augmented Voigt C.
+def _d4_params_from_C(C: np.ndarray) -> tuple[float, float, float]:
+    """Extract the three independent D4-class stiffness constants.
 
     Augmented Voigt order is [sigma_11, sigma_22, sigma_12, sigma_21] vs
-    [e_11, e_22, e_12, e_21], so for an isotropic material:
-        C[0,0] = C[1,1] = lambda + 2*mu
-        C[0,1] = C[1,0] = lambda
-        C[2,2] = C[3,3] = mu
-    For D4-symmetric cells (squared assembly) we average the two estimates
-    along each pair to dampen anisotropy noise.
+    [e_11, e_22, e_12, e_21]. For a D4-symmetric (squared-assembly) cell the
+    effective stiffness has exactly 3 independent entries:
+        C11 = C[0,0] = C[1,1]   (axial)
+        C12 = C[0,1] = C[1,0]   (lateral coupling)
+        C66 = C[2,2] = C[3,3]   (engineering shear)
+    We average each equivalent pair to dampen FEM numerical noise.
+
+    Isotropy is the additional constraint  C66 == (C11 - C12) / 2.
+    For random CA cells this generally does NOT hold (median Zener ratio
+    ~0.14 in the ca_bulk_squared dataset), so all three numbers are needed.
     """
-    mu = 0.5 * (C[2, 2] + C[3, 3])
-    lam = 0.5 * (C[0, 1] + C[1, 0])
-    return float(lam), float(mu)
+    C11 = 0.5 * (C[0, 0] + C[1, 1])
+    C12 = 0.5 * (C[0, 1] + C[1, 0])
+    C66 = 0.5 * (C[2, 2] + C[3, 3])
+    return float(C11), float(C12), float(C66)
 
 
 # ---------------------------------------------------------------------------
@@ -180,36 +198,43 @@ def _create_datasets(f: h5py.File, img_shape: tuple[int, int]) -> None:
         compression_opts=4,
     )
     f.create_dataset("C_eff", shape=(0, 4, 4), maxshape=(None, 4, 4), dtype=np.float64, chunks=(CHUNK, 4, 4))
-    for name in ("lambda_", "mu", "rho", "vf", "live_fraction"):
+    for name in ("C11", "C12", "C66", "lambda_", "mu", "rho", "vf", "vol", "live_fraction"):
         f.create_dataset(name, shape=(0,), maxshape=(None,), dtype=np.float64, chunks=(CHUNK,))
     f.create_dataset("source_idx", shape=(0,), maxshape=(None,), dtype=np.int64, chunks=(CHUNK,))
 
     f.attrs["E_cement"] = E_CEMENT
     f.attrs["nu"] = NU
-    f.attrs["rho_cement"] = RHO_CEMENT
     f.attrs["voigt_order"] = "[sigma_11, sigma_22, sigma_12, sigma_21]"
+    f.attrs["stiffness_params"] = "C11, C12, C66 (D4 class, 2D)"
+    f.attrs["lame_aliases"] = "lambda_ := C12, mu := C66 (back-compat; assume isotropy)"
 
 
 def _append(
     f: h5py.File,
     cell: np.ndarray,
     C: np.ndarray,
-    lam: float,
-    mu: float,
+    C11: float,
+    C12: float,
+    C66: float,
     rho: float,
     vf: float,
     lf: float,
     src_idx: int,
 ) -> None:
     idx = f["C_eff"].shape[0]
-    for key in ("cells", "C_eff", "lambda_", "mu", "rho", "vf", "live_fraction", "source_idx"):
+    for key in ("cells", "C_eff", "C11", "C12", "C66", "lambda_", "mu",
+                "rho", "vf", "vol", "live_fraction", "source_idx"):
         f[key].resize(idx + 1, axis=0)
     f["cells"][idx] = cell.astype(np.uint8)
     f["C_eff"][idx] = C
-    f["lambda_"][idx] = lam
-    f["mu"][idx] = mu
+    f["C11"][idx] = C11
+    f["C12"][idx] = C12
+    f["C66"][idx] = C66
+    f["lambda_"][idx] = C12  # back-compat alias (would-be lambda if isotropic)
+    f["mu"][idx] = C66       # back-compat alias (engineering shear modulus)
     f["rho"][idx] = rho
     f["vf"][idx] = vf
+    f["vol"][idx] = vf  # solid volume fraction, alias matching 3D pipeline naming
     f["live_fraction"][idx] = lf
     f["source_idx"][idx] = src_idx
 
@@ -292,10 +317,12 @@ def _dedup_pass(
 # is the standard pattern for sharing read-only data with a Pool — fork()
 # means the OS shares the underlying file pages with all workers for free.
 _W_CELLS: np.ndarray | None = None
+_W_RHO_SOLID: float = RHO_CEMENT
 
 
-def _worker_init(cells_path_str: str) -> None:
-    global _W_CELLS
+def _worker_init(cells_path_str: str, rho_solid: float = RHO_CEMENT) -> None:
+    global _W_CELLS, _W_RHO_SOLID
+    _W_RHO_SOLID = float(rho_solid)
 
     # Pin this worker to a distinct logical CPU so its thread pool can't
     # oversubscribe the box. Fall back silently on platforms without
@@ -325,7 +352,7 @@ def _worker_run(args: tuple[int, int]) -> tuple[int, np.ndarray | None, float | 
     cell = np.asarray(_W_CELLS[src_idx], dtype=np.int8)
     try:
         with _Timeout(timeout):
-            C, rho, vf = _compute_stiffness(cell)
+            C, rho, vf = _compute_stiffness(cell, rho_solid=_W_RHO_SOLID)
         return (src_idx, C, rho, vf, None)
     except TimeoutError:
         return (src_idx, None, None, None, "TIMEOUT")
@@ -440,6 +467,13 @@ def main() -> None:
         action="store_true",
         help="Append to an existing HDF5 file, skipping source indices already present.",
     )
+    parser.add_argument(
+        "--rho-solid",
+        type=float,
+        default=RHO_CEMENT,
+        help=f"Density of the solid phase (kg/m^3). Effective rho = vf * rho_solid. "
+             f"Default {RHO_CEMENT} (cement) preserves back-compat with the original pipeline.",
+    )
     args = parser.parse_args()
 
     in_dir: Path = args.input
@@ -476,6 +510,9 @@ def main() -> None:
         if "C_eff" not in f:
             _create_datasets(f, (H, W))
             f.attrs["fuzzy_pool"] = fuzzy_pool
+            f.attrs["rho_solid"] = float(args.rho_solid)
+            # Keep legacy attr name in sync for older readers.
+            f.attrs["rho_cement"] = float(args.rho_solid)
 
         # Resume: pre-populate dedup sets from already-stored cells, drop those
         # source indices from the work list.
@@ -509,7 +546,7 @@ def main() -> None:
                 cell = np.asarray(cells[src_idx], dtype=np.uint8)
                 try:
                     with _Timeout(args.timeout):
-                        C, rho, vf = _compute_stiffness(cell.astype(np.int8))
+                        C, rho, vf = _compute_stiffness(cell.astype(np.int8), rho_solid=args.rho_solid)
                 except TimeoutError:
                     tqdm.write(f"  TIMEOUT (>{args.timeout}s) at src={src_idx}")
                     failed_src.append(src_idx)
@@ -519,8 +556,8 @@ def main() -> None:
                     failed_src.append(src_idx)
                     continue
 
-                lam, mu = _lame_from_C(C)
-                _append(f, cell, C, lam, mu, rho, vf, float(live_fractions[src_idx]), src_idx)
+                C11, C12, C66 = _d4_params_from_C(C)
+                _append(f, cell, C, C11, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
                 accepted_src.append(src_idx)
                 if f["C_eff"].shape[0] % CHUNK == 0:
                     f.flush()
@@ -538,7 +575,7 @@ def main() -> None:
             with ctx.Pool(
                 processes=n_workers,
                 initializer=_worker_init,
-                initargs=(str(cells_path),),
+                initargs=(str(cells_path), float(args.rho_solid)),
             ) as pool:
                 pbar = tqdm(
                     pool.imap_unordered(_worker_run, tasks, chunksize=chunksize),
@@ -549,8 +586,8 @@ def main() -> None:
                 for src_idx, C, rho, vf, err in pbar:
                     if err is None:
                         cell = np.asarray(cells[src_idx], dtype=np.uint8)
-                        lam, mu = _lame_from_C(C)
-                        _append(f, cell, C, lam, mu, rho, vf, float(live_fractions[src_idx]), src_idx)
+                        C11, C12, C66 = _d4_params_from_C(C)
+                        _append(f, cell, C, C11, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
                         accepted_src.append(src_idx)
                         if f["C_eff"].shape[0] % CHUNK == 0:
                             f.flush()

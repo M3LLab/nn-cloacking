@@ -1,0 +1,32 @@
+# Smoke-test config: tiny model, 1 epoch on a fraction of batches.
+
+h5_path: output/ca_bulk_squared/stiffness.h5
+scaler_dir: microstructure_generation_2d
+split_path: microstructure_generation_2d/split.json
+val_frac: 0.02
+split_seed: 777
+
+results_folder: output/diffusion_ca_squared_smoke
+name: smoke
+seed: 777
+save_every_epoch: 1
+save_last: true
+continue_training: false
+
+image_size: 64
+base_channels: 16
+attention_resolutions: "8"
+with_attention: true
+num_heads: 2
+dropout: 0.1
+use_tensor_condition: true
+noise_schedule: linear
+
+batch_size: 8
+lr: 2.0e-4
+optimizer_name: adam
+ema_rate: 0.99
+training_epoch: 1
+gradient_clip_val: 1.0
+num_workers: 0
+precision: "32-true"
