@@ -165,17 +165,35 @@ class QKVAttention(nn.Module):
 
 
 class Upsample(nn.Module):
-    def __init__(self, channels: int, use_conv: bool = True, dims: int = 2):
+    """Nearest-neighbour upsample followed by an optional refining conv.
+
+    ``target_size`` overrides the default 2x scale_factor. Set this on the
+    deep blocks when the down-path used ceil-mode halving on a non-power-of-2
+    spatial size (e.g. 25 -> 13 -> 7 -> 4 needs explicit 4->7, 7->13, 13->25).
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        use_conv: bool = True,
+        dims: int = 2,
+        target_size: int | None = None,
+    ):
         super().__init__()
         self.channels = channels
         self.use_conv = use_conv
         self.dims = dims
+        self.target_size = target_size
         if use_conv:
             self.conv = conv_nd(dims, channels, channels, 3, padding=1)
 
     def forward(self, x):
         assert x.shape[1] == self.channels
-        x = F.interpolate(x, scale_factor=2, mode="nearest")
+        if self.target_size is None:
+            x = F.interpolate(x, scale_factor=2, mode="nearest")
+        else:
+            spatial_size = tuple([self.target_size] * self.dims)
+            x = F.interpolate(x, size=spatial_size, mode="nearest")
         if self.use_conv:
             x = self.conv(x)
         return x

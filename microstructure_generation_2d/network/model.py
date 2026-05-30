@@ -1,9 +1,17 @@
-"""2D conditional diffusion (continuous-time, v-DDIM-like) over 64x64 occupancy.
+"""2D conditional diffusion (continuous-time, v-DDIM-like).
 
 Adapted from microstructure_generation_3d/network/model.py. Only the two
 sampling modes we actually need are ported: `sample_unconditional` and
 `sample_with_tensor`. The classifier-guided 3D interpolation is intentionally
 omitted (per plan §4).
+
+Supports two spatial layouts:
+
+* legacy (``compressed=False``): 64x64 padded occupancy with a 7-pixel void
+  border. Loss is masked to the central 50x50 cell region.
+* v4+ (``compressed=True``): the 25x25 NW mirror-quadrant of the cell. No
+  padding, no border crop. Mirror tile (``unfold_mirror``) reconstructs the
+  full 50x50 cell at inference time.
 """
 from __future__ import annotations
 
@@ -29,7 +37,21 @@ TRUNCATED_TIME = 0.7
 TENSOR_DIM = 4  # (C11, C12, C66, vol)
 _CELL_SIZE = 50
 _PAD_TO = 64
-_OFF = (_PAD_TO - _CELL_SIZE) // 2  # 7-pixel void border; loss masked to cell region only
+_OFF = (_PAD_TO - _CELL_SIZE) // 2  # 7-pixel void border for legacy 64x64 mode
+
+
+def _parse_attention_sizes(spec) -> tuple[int, ...]:
+    """attention_sizes accepts a YAML list like [8, 4] or a CSV string '8,4'.
+
+    Values are interpreted as *spatial sizes* (H == W) where self-attention
+    should be applied, matching the existing v1-v3 YAML convention where
+    ``attention_resolutions: '8,4'`` meant attention at H=8 and H=4.
+    """
+    if spec is None:
+        return ()
+    if isinstance(spec, str):
+        return tuple(int(s) for s in spec.split(",") if s.strip())
+    return tuple(int(s) for s in spec)
 
 
 class OccupancyDiffusion(nn.Module):
@@ -38,6 +60,8 @@ class OccupancyDiffusion(nn.Module):
         image_size: int = 64,
         base_channels: int = 64,
         attention_resolutions: str = "8,4",
+        attention_sizes=None,
+        dim_mults=None,
         with_attention: bool = True,
         num_heads: int = 4,
         dropout: float = 0.1,
@@ -45,20 +69,31 @@ class OccupancyDiffusion(nn.Module):
         use_tensor_condition: bool = True,
         eps: float = 1e-6,
         noise_schedule: str = "linear",
+        compressed: bool = False,
     ):
         super().__init__()
         self.image_size = image_size
+        self.compressed = compressed
 
-        if image_size == 64:
-            channel_mult = (1, 2, 4, 8, 8)
-        elif image_size == 32:
-            channel_mult = (1, 2, 4, 8)
-        elif image_size == 16:
-            channel_mult = (1, 2, 4)
+        if dim_mults is None:
+            if image_size == 64:
+                channel_mult = (1, 2, 4, 8, 8)
+            elif image_size == 32:
+                channel_mult = (1, 2, 4, 8)
+            elif image_size == 25:
+                channel_mult = (1, 2, 4, 8)  # 25 -> 13 -> 7 -> 4
+            elif image_size == 16:
+                channel_mult = (1, 2, 4)
+            else:
+                raise ValueError(
+                    f"unsupported image size {image_size}; pass dim_mults explicitly"
+                )
         else:
-            raise ValueError(f"unsupported image size: {image_size}")
+            channel_mult = tuple(int(m) for m in dim_mults)
 
-        attention_ds = tuple(image_size // int(r) for r in attention_resolutions.split(","))
+        attn_sizes = _parse_attention_sizes(
+            attention_sizes if attention_sizes is not None else attention_resolutions
+        )
 
         self.eps = eps
         self.verbose = verbose
@@ -79,7 +114,7 @@ class OccupancyDiffusion(nn.Module):
             use_tensor_condition=use_tensor_condition,
             world_dims=2,
             num_heads=num_heads,
-            attention_resolutions=attention_ds,
+            attention_sizes=attn_sizes,
             with_attention=with_attention,
             verbose=verbose,
             tensor_condition_dim=TENSOR_DIM,
@@ -109,6 +144,9 @@ class OccupancyDiffusion(nn.Module):
             with torch.no_grad():
                 self_cond = self.denoise_fn(noised_img, noise_level, tensor_feature).detach_()
         pred = self.denoise_fn(noised_img, noise_level, tensor_feature, self_cond)
+        if self.compressed:
+            # Compressed mode: image is the 25x25 quadrant, no void border to mask.
+            return F.mse_loss(pred, img)
         return F.mse_loss(pred[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE],
                           img[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE])
 

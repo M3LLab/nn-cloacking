@@ -1,9 +1,14 @@
 """Torch Dataset over the ca_bulk_squared stiffness.h5 subset.
 
-Provides 64x64 padded occupancy fields ({-1, +1}) plus a 4-dim conditioning
-vector (scaled C11, scaled C12, scaled C66, raw vol). Classifier-free guidance
-dropout matches the 3D pipeline's 10/10/10% schedule (see
-`microstructure_generation_3d/network/data_loader.py`).
+Two modes:
+
+* ``compressed=False`` (legacy): 64x64 padded occupancy fields ({-1, +1}).
+* ``compressed=True`` (v4+): the NW 25x25 mirror-quadrant of the cell. The
+  full 50x50 dataset cell is exactly recovered by mirror tiling
+  (``unfold_mirror``), the inverse of ``generator._assemble_squared``.
+
+Both modes return a 4-dim conditioning vector (scaled C11/C12/C66, raw vol)
+with the 10/10/10% classifier-free dropout schedule from the 3D pipeline.
 
 A deterministic train/val split (seeded shuffle) is materialised on first use
 and persisted to JSON so independent processes / future runs see the same one.
@@ -13,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from random import random
-from typing import Optional
+from typing import Optional, Union
 
 import h5py
 import joblib
@@ -23,6 +28,7 @@ from torch.utils.data import Dataset
 
 
 CELL_SIZE = 50
+QUADRANT_SIZE = CELL_SIZE // 2  # = 25
 PAD_TO = 64
 TENSOR_DIM = 4  # C11, C12, C66, vol
 CFG_SENTINEL = -1.0  # matches the 3D pipeline; see plan §2
@@ -34,6 +40,33 @@ def _pad_to_64(cell_pm1: np.ndarray) -> np.ndarray:
     off = (PAD_TO - CELL_SIZE) // 2  # = 7
     out[off : off + CELL_SIZE, off : off + CELL_SIZE] = cell_pm1
     return out
+
+
+def unfold_mirror(quadrant: Union[np.ndarray, torch.Tensor]):
+    """Mirror-tile a (..., 25, 25) NW quadrant to (..., 50, 50).
+
+    Layout matches ``dataset/cellular_chiral/generator.py:_assemble_squared``:
+
+        TL = Q              TR = fliplr(Q)
+        BL = flipud(Q)      BR = flipud(fliplr(Q))
+
+    Works on numpy arrays or torch tensors of any leading batch shape.
+    """
+    if isinstance(quadrant, torch.Tensor):
+        tl = quadrant
+        tr = torch.flip(quadrant, dims=(-1,))
+        bl = torch.flip(quadrant, dims=(-2,))
+        br = torch.flip(quadrant, dims=(-2, -1))
+        top = torch.cat([tl, tr], dim=-1)
+        bot = torch.cat([bl, br], dim=-1)
+        return torch.cat([top, bot], dim=-2)
+    tl = quadrant
+    tr = np.flip(quadrant, axis=-1)
+    bl = np.flip(quadrant, axis=-2)
+    br = np.flip(quadrant, axis=(-2, -1))
+    top = np.concatenate([tl, tr], axis=-1)
+    bot = np.concatenate([bl, br], axis=-1)
+    return np.concatenate([top, bot], axis=-2)
 
 
 def make_split(n: int, val_frac: float, seed: int, out_path: Path) -> dict:
@@ -73,12 +106,14 @@ class CABulkDiffusionDataset(Dataset):
         indices: list[int],
         cfg_dropout: bool = True,
         seed: Optional[int] = None,
+        compressed: bool = False,
     ):
         super().__init__()
         self.h5_path = str(h5_path)
         self.scaler_dir = Path(scaler_dir)
         self.indices = np.asarray(indices, dtype=np.int64)
         self.cfg_dropout = cfg_dropout
+        self.compressed = compressed
         self._h5: Optional[h5py.File] = None
         self._cells = None  # type: ignore
         self._C11 = None
@@ -108,7 +143,10 @@ class CABulkDiffusionDataset(Dataset):
 
         cell_u8 = np.asarray(self._cells[h_idx], dtype=np.uint8)  # (50, 50)
         cell_pm1 = (cell_u8.astype(np.float32) * 2.0 - 1.0)
-        occ = _pad_to_64(cell_pm1)[None, :, :]  # (1, 64, 64)
+        if self.compressed:
+            occ = cell_pm1[:QUADRANT_SIZE, :QUADRANT_SIZE][None, :, :]  # (1, 25, 25)
+        else:
+            occ = _pad_to_64(cell_pm1)[None, :, :]  # (1, 64, 64)
 
         c11 = float(self._C11[h_idx])
         c12 = float(self._C12[h_idx])

@@ -4,10 +4,14 @@ Adapted from microstructure_generation_3d/network/unet.py. Key differences:
 
 - `world_dims` defaults to 2 and is propagated everywhere (the 3D version had
   it hardcoded in two CrossAttention sites).
-- The 3D code symmetrized the input/output over the S3 permutations of the
-  three spatial axes. We DO NOT symmetrize here: the squared-assembly CA cell
-  is only D4-symmetric at the tiling level, not internally (see plan §7), and
-  the model is trained on the raw cell.
+- No in-network symmetrization. v1-v3 trained on a 64x64 padded cell; v4+
+  trains on the compressed 25x25 NW mirror-quadrant and the inverse mirror
+  tile (`unfold_mirror`) is applied deterministically at inference time.
+- Down/up path tracks spatial sizes explicitly (ceil-mode stride-2) so the
+  network works on non-power-of-2 inputs like 25 -> 13 -> 7 -> 4. Each
+  Upsample is instantiated with the matching down-side target size.
+- Attention placement is configured by spatial size via `attention_sizes`
+  (a set of int H values), not by downsample-factor `attention_resolutions`.
 - `tensor_condition_dim` is 4 (C11, C12, C66, vol).
 """
 from __future__ import annotations
@@ -39,7 +43,7 @@ class UNetModel(nn.Module):
         dropout: float = 0.1,
         num_heads: int = 4,
         world_dims: int = 2,
-        attention_resolutions=(4, 8),
+        attention_sizes=(4, 8),
         with_attention: bool = True,
         verbose: bool = False,
         tensor_condition_dim: int = 4,
@@ -54,6 +58,18 @@ class UNetModel(nn.Module):
         channels = [base_channels, *map(lambda m: base_channels * m, dim_mults)]
         in_out = list(zip(channels[:-1], channels[1:]))
         emb_dim = base_channels * 4
+
+        attention_sizes = set(int(s) for s in attention_sizes)
+
+        # Pre-compute per-level spatial sizes via ceil-mode stride-2 halving so
+        # the up-path can target the matching down-side size on non-power-of-2
+        # inputs (e.g. 25 -> 13 -> 7 -> 4 for image_size=25, 4 levels).
+        num_resolutions = len(in_out)
+        down_sizes = [image_size]
+        for i in range(num_resolutions - 1):
+            down_sizes.append((down_sizes[-1] + 1) // 2)
+        self.down_sizes = down_sizes
+        mid_size = down_sizes[-1]
 
         self.time_pos_emb = LearnedSinusoidalPosEmb(base_channels)
         self.time_emb = nn.Sequential(
@@ -81,11 +97,10 @@ class UNetModel(nn.Module):
         self.input_emb = conv_nd(world_dims, 2, base_channels, 3, padding=1)
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
-        num_resolutions = len(in_out)
-        ds = 1
 
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
+            block_size = down_sizes[ind]
             self.downs.append(nn.ModuleList([
                 ResnetBlock(
                     world_dims, dim_in, dim_out, emb_dim=emb_dim, dropout=dropout,
@@ -98,14 +113,11 @@ class UNetModel(nn.Module):
                     normalization(dim_out),
                     activation_function(),
                     AttentionBlock(dim_out, num_heads=num_heads),
-                ) if ds in attention_resolutions and with_attention else our_Identity(),
+                ) if block_size in attention_sizes and with_attention else our_Identity(),
                 Downsample(dim_out, dims=world_dims) if not is_last else our_Identity(),
             ]))
-            if not is_last:
-                ds *= 2
 
         mid_dim = channels[-1]
-        res = image_size // ds
         self.mid_block1 = ResnetBlock(
             world_dims, mid_dim, mid_dim, emb_dim=emb_dim, dropout=dropout,
             use_tensor_condition=use_tensor_condition,
@@ -115,7 +127,7 @@ class UNetModel(nn.Module):
         self.mid_cross_attn2 = (
             CrossAttention(
                 feature_dim=mid_dim, tensor_dim=emb_dim,
-                num_heads=num_heads, image_size=res, world_dims=world_dims,
+                num_heads=num_heads, image_size=mid_size, world_dims=world_dims,
                 drop_out=dropout,
             ) if use_tensor_condition else our_Identity()
         )
@@ -124,7 +136,7 @@ class UNetModel(nn.Module):
                 normalization(mid_dim),
                 activation_function(),
                 AttentionBlock(mid_dim, num_heads=num_heads),
-            ) if ds in attention_resolutions and with_attention else our_Identity()
+            ) if mid_size in attention_sizes and with_attention else our_Identity()
         )
         self.mid_block2 = ResnetBlock(
             world_dims, mid_dim, mid_dim, emb_dim=emb_dim, dropout=dropout,
@@ -132,8 +144,15 @@ class UNetModel(nn.Module):
             tensor_condition_dim=tensor_condition_dim,
         )
 
+        # Up path iterates num_resolutions-1 blocks. Each upsample reverses one
+        # down step: iteration ind targets down_sizes[num_resolutions-2-ind].
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
+            target_size = down_sizes[num_resolutions - 2 - ind]
+            # ResnetBlock at this stage runs at the *deeper* (smaller) size,
+            # which is target_size of the *previous* upsample, i.e. one level
+            # smaller than target_size for the very first up-iter (mid_size)
+            # and otherwise down_sizes[num_resolutions-1-ind].
+            block_size = down_sizes[num_resolutions - 1 - ind]
             self.ups.append(nn.ModuleList([
                 ResnetBlock(
                     world_dims, dim_out * 2, dim_in, emb_dim=emb_dim, dropout=dropout,
@@ -146,11 +165,9 @@ class UNetModel(nn.Module):
                     normalization(dim_in),
                     activation_function(),
                     AttentionBlock(dim_in, num_heads=num_heads),
-                ) if ds in attention_resolutions and with_attention else our_Identity(),
-                Upsample(dim_in, dims=world_dims) if not is_last else our_Identity(),
+                ) if block_size in attention_sizes and with_attention else our_Identity(),
+                Upsample(dim_in, dims=world_dims, target_size=target_size),
             ]))
-            if not is_last:
-                ds //= 2
 
         self.end = nn.Sequential(normalization(base_channels), activation_function())
         self.out = conv_nd(world_dims, base_channels, 1, 3, padding=1)

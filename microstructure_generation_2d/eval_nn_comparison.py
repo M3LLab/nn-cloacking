@@ -48,7 +48,7 @@ import torch
 from tqdm import tqdm
 
 from dataset.cellular_chiral.diffusion_dataset import (
-    CELL_SIZE, PAD_TO, load_or_make_split,
+    CELL_SIZE, PAD_TO, load_or_make_split, unfold_mirror,
 )
 from .network.model_trainer import DiffusionModel
 
@@ -71,6 +71,12 @@ VOL_STD  = 0.104
 def _crop(arr: np.ndarray) -> np.ndarray:
     off = (PAD_TO - CELL_SIZE) // 2
     return arr[..., off : off + CELL_SIZE, off : off + CELL_SIZE]
+
+
+def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
+    if compressed:
+        return unfold_mirror(arr).astype(np.uint8)
+    return _crop(arr)
 
 
 def _run_fem(cell_uint8: np.ndarray) -> tuple[float, float, float, float]:
@@ -211,6 +217,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--tensor-w", type=float, default=2.0)
     parser.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--compressed", action=argparse.BooleanOptionalAction, default=None,
+                        help="Override the checkpoint's compressed flag (defaults to "
+                             "checkpoint hparam).")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-samples", type=int, default=None,
@@ -259,6 +268,12 @@ def main() -> None:
     generator = module.ema_model if args.ema else module.model
     generator.eval()
 
+    compressed = (
+        args.compressed
+        if args.compressed is not None
+        else bool(module.hparams.get("compressed", False))
+    )
+
     # ---- resume: skip already-done ----
     done_ids = _load_done_ids(csv_path)
     print(f"Already done : {len(done_ids)}")
@@ -298,8 +313,8 @@ def main() -> None:
                     tensor_w=args.tensor_w,
                     verbose=False,
                 )
-            arr64    = img.cpu().numpy().squeeze()
-            gen_cell = _crop((arr64 > 0).astype(np.uint8))
+            arr      = img.cpu().numpy().squeeze()  # (H, H) with H in {64, 25}
+            gen_cell = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
 
             # -- FEM on generated --
             c11_gen, c12_gen, c66_gen, vol_gen = _run_fem(gen_cell)

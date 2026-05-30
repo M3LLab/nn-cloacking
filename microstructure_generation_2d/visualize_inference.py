@@ -37,7 +37,7 @@ import torch
 from tqdm import tqdm
 
 from dataset.cellular_chiral.diffusion_dataset import (
-    CELL_SIZE, PAD_TO, load_or_make_split,
+    CELL_SIZE, PAD_TO, load_or_make_split, unfold_mirror,
 )
 from .network.model_trainer import DiffusionModel
 
@@ -49,6 +49,12 @@ from .network.model_trainer import DiffusionModel
 def _crop_64_to_50(arr: np.ndarray) -> np.ndarray:
     off = (PAD_TO - CELL_SIZE) // 2
     return arr[..., off : off + CELL_SIZE, off : off + CELL_SIZE]
+
+
+def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
+    if compressed:
+        return unfold_mirror(arr).astype(np.uint8)
+    return _crop_64_to_50(arr)
 
 
 def _pick_indices(split: dict, n: int, source: str, seed: int) -> list[int]:
@@ -258,6 +264,9 @@ def main() -> None:
     parser.add_argument("--tensor-w", type=float, default=2.0,
                         help="Classifier-free guidance scale")
     parser.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--compressed", action=argparse.BooleanOptionalAction, default=None,
+                        help="Override the checkpoint's compressed flag (defaults to "
+                             "checkpoint hparam).")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--indices", type=int, nargs="*", default=None,
@@ -289,6 +298,12 @@ def main() -> None:
     generator = module.ema_model if args.ema else module.model
     generator.eval()
 
+    compressed = (
+        args.compressed
+        if args.compressed is not None
+        else bool(module.hparams.get("compressed", False))
+    )
+
     for row in tqdm(rows, desc="sampling"):
         img = generator.sample_with_tensor(
             tensor_c=row["tensor_feature"],
@@ -297,8 +312,8 @@ def main() -> None:
             tensor_w=args.tensor_w,
             verbose=False,
         )
-        arr64 = img.detach().cpu().numpy().squeeze()  # (64, 64)
-        row["gen_cell"] = _crop_64_to_50((arr64 > 0).astype(np.uint8))
+        arr = img.detach().cpu().numpy().squeeze()  # (H, H) with H in {64, 25}
+        row["gen_cell"] = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
 
     # Grid (always saved)
     _plot_grid(rows, Path(args.output), args.steps, args.tensor_w)

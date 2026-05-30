@@ -25,15 +25,25 @@ import torch
 from tqdm import tqdm
 
 from dataset.cellular_chiral.diffusion_dataset import (
-    CELL_SIZE, PAD_TO, CFG_SENTINEL,
+    CELL_SIZE, PAD_TO, CFG_SENTINEL, unfold_mirror,
 )
 from .network.model_trainer import DiffusionModel
 
 
 def _crop_64_to_50(arr: np.ndarray) -> np.ndarray:
-    """Inverse of dataset _pad_to_64; arr is (..., 64, 64)."""
+    """Inverse of dataset _pad_to_64; arr is (..., 64, 64). Legacy mode only."""
     off = (PAD_TO - CELL_SIZE) // 2
     return arr[..., off : off + CELL_SIZE, off : off + CELL_SIZE]
+
+
+def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
+    """Decode the model's raw output (after sign threshold) into a (..., 50, 50)
+    binary cell. Legacy v1-v3 models output 64x64 padded; v4+ outputs the 25x25
+    NW mirror-quadrant that we tile via ``unfold_mirror``.
+    """
+    if compressed:
+        return unfold_mirror(arr).astype(np.uint8)
+    return _crop_64_to_50(arr)
 
 
 def _scale_targets(row: dict, scaler_dir: Path) -> np.ndarray:
@@ -92,6 +102,11 @@ def main() -> None:
     parser.add_argument("--ema", action="store_true", default=True)
     parser.add_argument("--no-fem", action="store_true",
                         help="Skip the FEM round-trip (just save cells)")
+    parser.add_argument("--compressed", action=argparse.BooleanOptionalAction, default=None,
+                        help="Override the checkpoint's compressed flag. v4+ "
+                             "compressed=True decodes 25x25 -> 50x50 via mirror tile; "
+                             "v1-v3 compressed=False decodes 64x64 -> 50x50 via crop. "
+                             "Defaults to the checkpoint's saved hparam.")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -108,6 +123,12 @@ def main() -> None:
     generator = module.ema_model if args.ema else module.model
     generator.eval()
 
+    compressed = (
+        args.compressed
+        if args.compressed is not None
+        else bool(module.hparams.get("compressed", False))
+    )
+
     with open(args.targets) as f:
         rows = list(csv.DictReader(f))
 
@@ -122,9 +143,9 @@ def main() -> None:
             tensor_w=args.tensor_w,
             verbose=False,
         )
-        arr64 = img.detach().cpu().numpy().squeeze(1)  # (B, 64, 64)
-        bin64 = (arr64 > 0).astype(np.uint8)
-        bin50 = _crop_64_to_50(bin64)  # (B, 50, 50)
+        arr = img.detach().cpu().numpy().squeeze(1)  # (B, H, H) with H in {64, 25}
+        bin_raw = (arr > 0).astype(np.uint8)
+        bin50 = _decode_to_50(bin_raw, compressed=compressed)  # (B, 50, 50)
         all_cells.append(bin50)
 
         target_record = {"target_idx": tgt_i, **{k: float(row[k]) for k in row}}

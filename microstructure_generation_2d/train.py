@@ -54,6 +54,8 @@ def main() -> None:
         image_size=cfg.get("image_size", 64),
         base_channels=cfg.get("base_channels", 64),
         attention_resolutions=cfg.get("attention_resolutions", "8,4"),
+        attention_sizes=cfg.get("attention_sizes", None),
+        dim_mults=cfg.get("dim_mults", None),
         with_attention=cfg.get("with_attention", True),
         num_heads=cfg.get("num_heads", 4),
         dropout=cfg.get("dropout", 0.1),
@@ -68,6 +70,7 @@ def main() -> None:
         gradient_clip_val=cfg.get("gradient_clip_val", 1.0),
         save_every_epoch=cfg.get("save_every_epoch", 5),
         num_workers=cfg.get("num_workers", None),
+        compressed=cfg.get("compressed", False),
     )
     model = DiffusionModel(**model_kwargs)
 

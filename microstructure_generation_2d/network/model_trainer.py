@@ -49,22 +49,29 @@ class DiffusionModel(LightningModule):
         noise_schedule: str = "linear",
         num_workers: int | None = None,
         lr_schedule: str = "none",
+        compressed: bool = False,
+        dim_mults=None,
+        attention_sizes=None,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.automatic_optimization = False
 
         self.results_folder = Path(results_folder)
+        self.compressed = compressed
         self.model = OccupancyDiffusion(
             image_size=image_size,
             base_channels=base_channels,
             attention_resolutions=attention_resolutions,
+            attention_sizes=attention_sizes,
+            dim_mults=dim_mults,
             with_attention=with_attention,
             dropout=dropout,
             use_tensor_condition=use_tensor_condition,
             num_heads=num_heads,
             noise_schedule=noise_schedule,
             verbose=verbose,
+            compressed=compressed,
         )
 
         self.batch_size = batch_size
@@ -127,6 +134,7 @@ class DiffusionModel(LightningModule):
             scaler_dir=self.scaler_dir,
             indices=indices,
             cfg_dropout=cfg_dropout,
+            compressed=self.compressed,
         )
         return DataLoader(
             ds, batch_size=self.batch_size, shuffle=shuffle,
