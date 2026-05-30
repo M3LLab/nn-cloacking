@@ -27,6 +27,9 @@ from .unet import UNetModel
 
 TRUNCATED_TIME = 0.7
 TENSOR_DIM = 4  # (C11, C12, C66, vol)
+_CELL_SIZE = 50
+_PAD_TO = 64
+_OFF = (_PAD_TO - _CELL_SIZE) // 2  # 7-pixel void border; loss masked to cell region only
 
 
 class OccupancyDiffusion(nn.Module):
@@ -106,7 +109,8 @@ class OccupancyDiffusion(nn.Module):
             with torch.no_grad():
                 self_cond = self.denoise_fn(noised_img, noise_level, tensor_feature).detach_()
         pred = self.denoise_fn(noised_img, noise_level, tensor_feature, self_cond)
-        return F.mse_loss(pred, img)
+        return F.mse_loss(pred[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE],
+                          img[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE])
 
     @torch.no_grad()
     def _sample_loop(self, img, tensor_cond, tensor_zero, steps, tensor_w, verbose):

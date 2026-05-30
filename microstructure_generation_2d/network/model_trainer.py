@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from pytorch_lightning import LightningModule
 from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from dataset.cellular_chiral.diffusion_dataset import (
@@ -47,6 +48,7 @@ class DiffusionModel(LightningModule):
         use_tensor_condition: bool = True,
         noise_schedule: str = "linear",
         num_workers: int | None = None,
+        lr_schedule: str = "none",
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -70,6 +72,8 @@ class DiffusionModel(LightningModule):
         self.optimizer_name = optimizer_name
         self.use_tensor_condition = use_tensor_condition
         self.gradient_clip_val = gradient_clip_val
+        self.lr_schedule = lr_schedule
+        self.training_epoch = training_epoch
         self.ema_updater = EMA(ema_rate)
         self.ema_model = copy.deepcopy(self.model)
         self.reset_parameters()
@@ -96,10 +100,15 @@ class DiffusionModel(LightningModule):
     # ----------------------------------------------------------- optimizers --
     def configure_optimizers(self):
         if self.optimizer_name == "adamw":
-            return AdamW(self.model.parameters(), lr=self.lr)
-        if self.optimizer_name == "adam":
-            return Adam(self.model.parameters(), lr=self.lr)
-        raise NotImplementedError(self.optimizer_name)
+            opt = AdamW(self.model.parameters(), lr=self.lr)
+        elif self.optimizer_name == "adam":
+            opt = Adam(self.model.parameters(), lr=self.lr)
+        else:
+            raise NotImplementedError(self.optimizer_name)
+        if self.lr_schedule == "cosine":
+            sched = CosineAnnealingLR(opt, T_max=self.training_epoch, eta_min=1e-6)
+            return {"optimizer": opt, "lr_scheduler": {"scheduler": sched, "interval": "epoch"}}
+        return opt
 
     # ---------------------------------------------------------------- data --
     def _split_dict(self) -> dict:
@@ -155,4 +164,9 @@ class DiffusionModel(LightningModule):
 
     def on_train_epoch_end(self):
         self.log("current_epoch", float(self.current_epoch), logger=True)
+        if self.lr_schedule == "cosine":
+            sched = self.lr_schedulers()
+            if sched is not None:
+                sched.step()
+                self.log("lr", sched.get_last_lr()[0], logger=True)
         return super().on_train_epoch_end()

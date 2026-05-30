@@ -59,6 +59,7 @@ def main() -> None:
         dropout=cfg.get("dropout", 0.1),
         use_tensor_condition=cfg.get("use_tensor_condition", True),
         noise_schedule=cfg.get("noise_schedule", "linear"),
+        lr_schedule=cfg.get("lr_schedule", "none"),
         batch_size=cfg.get("batch_size", 64),
         lr=cfg.get("lr", 2e-4),
         optimizer_name=cfg.get("optimizer_name", "adam"),
@@ -83,6 +84,13 @@ def main() -> None:
         every_n_epochs=cfg.get("save_every_epoch", 5),
         mode="max",
     )
+    best_ckpt_cb = ModelCheckpoint(
+        monitor="val_loss",
+        dirpath=results_folder,
+        filename="best",
+        save_top_k=1,
+        mode="min",
+    )
 
     max_epochs = args.max_epochs_override or cfg.get("training_epoch", 100)
     accelerator = args.accelerator or ("gpu" if _has_gpu() else "cpu")
@@ -94,7 +102,7 @@ def main() -> None:
         max_epochs=max_epochs,
         logger=tb_logger,
         log_every_n_steps=10,
-        callbacks=[checkpoint_cb],
+        callbacks=[checkpoint_cb, best_ckpt_cb],
         precision=cfg.get("precision", "32-true"),
         limit_train_batches=args.limit_train_batches if args.limit_train_batches is not None else 1.0,
         limit_val_batches=args.limit_val_batches if args.limit_val_batches is not None else 1.0,
