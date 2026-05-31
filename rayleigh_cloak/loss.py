@@ -215,6 +215,83 @@ def transmission_loss(
 # ── Loss resolution from config ────────────────────────────────────
 
 
+def make_fixed_depth_eval_points(
+    geometry,
+    params,
+    depth: float,
+    n_points: int,
+    noise_sigma: float = 0.0,
+    seed: int = 0,
+) -> tuple[np.ndarray, float]:
+    """Return ``(xs, y_depth)``: x-positions on a horizontal line at depth
+    ``depth`` below the free surface, optionally jittered by Gaussian noise.
+
+    Positions whose ``(x, y_depth)`` falls inside the cloak or defect footprint
+    are dropped — those are either absent from the cloak mesh (defect) or
+    measure the cloak's interior (cloak), neither of which reflects the
+    cloak's external invisibility. The kept positions are exactly those where
+    a perfect cloak would yield ``u_cloak == u_ref``.
+
+    Endpoints of ``[x_off, x_off + W]`` are excluded to avoid the right PML
+    interface and the left edge of the physical domain.
+    """
+    if depth <= 0.0:
+        raise ValueError(
+            f"depth must be > 0 (got {depth!r}); use loss.type='top_surface' "
+            f"for the free surface."
+        )
+    if depth >= float(params.H):
+        raise ValueError(
+            f"depth ({depth!r}) must be < physical height H ({params.H!r}); "
+            f"deeper lines fall in/below the bottom PML, where the field is "
+            f"attenuated and the loss is meaningless."
+        )
+    x_left = params.x_off
+    x_right = params.x_off + params.W
+    y_depth = float(params.y_top) - float(depth)
+    xs = np.linspace(x_left, x_right, n_points + 2)[1:-1]
+    if noise_sigma > 0:
+        rng = np.random.default_rng(seed)
+        xs = xs + rng.normal(0.0, float(noise_sigma), size=xs.shape)
+        xs = np.clip(xs, x_left, x_right)
+
+    keep = []
+    for x in xs:
+        pt = jnp.array([float(x), float(y_depth)])
+        if not bool(geometry.in_defect(pt)) and not bool(geometry.in_cloak(pt)):
+            keep.append(float(x))
+    if not keep:
+        raise RuntimeError(
+            f"All {n_points} depth-line eval points at depth={depth!r} fall "
+            f"inside the cloak/defect footprint. Increase n_eval_points, "
+            f"widen the domain, or pick a depth below the cloak (> b)."
+        )
+    return np.asarray(keep, dtype=np.float64), y_depth
+
+
+def find_nearest_node_indices(
+    mesh_points: np.ndarray,
+    eval_xs: np.ndarray,
+    y_target: float,
+) -> np.ndarray:
+    """For each ``x_eval``, return the cloak-mesh node index closest to
+    ``(x_eval, y_target)`` in Euclidean distance.
+
+    Used by the ``"depth_line"`` loss, which evaluates u on an interior
+    horizontal line. Unlike the embedded top-surface path, the cloak mesh is
+    not built with these positions forced — accuracy depends on local mesh
+    density at the target depth (control via
+    ``MeshConfig.refinement_factor_outside``).
+    """
+    pts = np.asarray(mesh_points)
+    out = np.empty(len(eval_xs), dtype=np.int64)
+    for i, x in enumerate(eval_xs):
+        dx = pts[:, 0] - float(x)
+        dy = pts[:, 1] - float(y_target)
+        out[i] = int(np.argmin(dx * dx + dy * dy))
+    return out
+
+
 def find_embedded_eval_node_indices(
     mesh_points: np.ndarray,
     eval_xs: np.ndarray,
@@ -274,6 +351,11 @@ def resolve_loss_target(
         (all downstream surface nodes) is used when ``loss_cfg`` is None or
         ``n_eval_points == 0``.
 
+        Required when ``loss_type == "depth_line"``: the depth and number of
+        eval points are read from ``loss_cfg.depth`` and ``loss_cfg.
+        n_eval_points``. Nodes are selected by nearest-neighbour to the
+        ``(x, y_top - depth)`` positions (no mesh embedding).
+
     Returns
     -------
     indices : np.ndarray
@@ -315,10 +397,27 @@ def resolve_loss_target(
             params.x_off, params.y_off, params.W, params.H,
         )
         loss_fn = cloaking_loss
+    elif loss_type == "depth_line":
+        if loss_cfg is None:
+            raise ValueError("loss.type='depth_line' requires a LossConfig.")
+        n_eval = int(loss_cfg.n_eval_points)
+        if n_eval <= 0:
+            raise ValueError(
+                "loss.type='depth_line' requires loss.n_eval_points > 0."
+            )
+        eval_xs, y_target = make_fixed_depth_eval_points(
+            geometry, params,
+            depth=float(loss_cfg.depth),
+            n_points=n_eval,
+            noise_sigma=float(loss_cfg.eval_noise_sigma),
+            seed=int(loss_cfg.eval_noise_seed),
+        )
+        indices = find_nearest_node_indices(pts, eval_xs, y_target)
+        loss_fn = cloaking_loss
     else:
         raise ValueError(
-            f"Unknown loss type: {loss_type!r}. "
-            f"Choose from 'right_boundary', 'top_surface', 'outside_cloak'."
+            f"Unknown loss type: {loss_type!r}. Choose from "
+            f"'right_boundary', 'top_surface', 'outside_cloak', 'depth_line'."
         )
 
     u_ref_at_nodes = jnp.array(u_ref[kept_nodes[indices]])

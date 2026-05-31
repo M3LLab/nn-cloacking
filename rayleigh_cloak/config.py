@@ -188,9 +188,12 @@ class LossConfig(BaseModel):
       beyond the cloak footprint.
     - ``"outside_cloak"``: relative L2 over all physical-domain nodes outside
       the cloak.
+    - ``"depth_line"``: relative L2 on a horizontal line at depth ``depth``
+      below the free surface, restricted to x-positions outside the cloak
+      footprint. ``n_eval_points`` controls the line resolution.
     """
     model_config = {"extra": "ignore"}
-    type: Literal["right_boundary", "top_surface", "outside_cloak"] = "right_boundary"
+    type: Literal["right_boundary", "top_surface", "outside_cloak", "depth_line"] = "right_boundary"
     multi_freq: MultiFreqConfig = MultiFreqConfig()
     regularizations: RegularizationsConfig = RegularizationsConfig()
     # Mesh-independent surface metric: when ``n_eval_points > 0``, the
@@ -203,6 +206,11 @@ class LossConfig(BaseModel):
                                      # physical units, to break resonance with
                                      # any test wavelength (recommended ~λ*/200).
     eval_noise_seed: int = 0
+    # Depth below the free surface (physical units) at which the
+    # ``"depth_line"`` loss evaluates u. Must be > 0; depth == a places the
+    # line at the triangular defect's apex, depth > b places it strictly
+    # below the cloak.
+    depth: float = 0.0
 
 
 class NeuralReparamConfig(BaseModel):
