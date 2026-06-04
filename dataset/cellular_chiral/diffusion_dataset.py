@@ -7,7 +7,7 @@ Two modes:
   full 50x50 dataset cell is exactly recovered by mirror tiling
   (``unfold_mirror``), the inverse of ``generator._assemble_squared``.
 
-Both modes return a 4-dim conditioning vector (scaled C11/C12/C66, raw vol)
+Both modes return a 5-dim conditioning vector (scaled C11/C22/C12/C66, raw vol)
 with the 10/10/10% classifier-free dropout schedule from the 3D pipeline.
 
 A deterministic train/val split (seeded shuffle) is materialised on first use
@@ -30,7 +30,7 @@ from torch.utils.data import Dataset
 CELL_SIZE = 50
 QUADRANT_SIZE = CELL_SIZE // 2  # = 25
 PAD_TO = 64
-TENSOR_DIM = 4  # C11, C12, C66, vol
+TENSOR_DIM = 5  # C11, C22, C12, C66, vol
 CFG_SENTINEL = -1.0  # matches the 3D pipeline; see plan §2
 
 
@@ -117,11 +117,13 @@ class CABulkDiffusionDataset(Dataset):
         self._h5: Optional[h5py.File] = None
         self._cells = None  # type: ignore
         self._C11 = None
+        self._C22 = None
         self._C12 = None
         self._C66 = None
         self._vol = None
 
         self.scaler_C11 = joblib.load(self.scaler_dir / "scaler_C11")
+        self.scaler_C22 = joblib.load(self.scaler_dir / "scaler_C22")
         self.scaler_C12 = joblib.load(self.scaler_dir / "scaler_C12")
         self.scaler_C66 = joblib.load(self.scaler_dir / "scaler_C66")
 
@@ -130,6 +132,7 @@ class CABulkDiffusionDataset(Dataset):
             self._h5 = h5py.File(self.h5_path, "r", swmr=True)
             self._cells = self._h5["cells"]
             self._C11 = self._h5["C11"]
+            self._C22 = self._h5["C22"]
             self._C12 = self._h5["C12"]
             self._C66 = self._h5["C66"]
             self._vol = self._h5["vol"]
@@ -149,24 +152,26 @@ class CABulkDiffusionDataset(Dataset):
             occ = _pad_to_64(cell_pm1)[None, :, :]  # (1, 64, 64)
 
         c11 = float(self._C11[h_idx])
+        c22 = float(self._C22[h_idx])
         c12 = float(self._C12[h_idx])
         c66 = float(self._C66[h_idx])
         vol = float(self._vol[h_idx])
 
         c11s = float(self.scaler_C11.transform([[c11]])[0, 0])
+        c22s = float(self.scaler_C22.transform([[c22]])[0, 0])
         c12s = float(self.scaler_C12.transform([[c12]])[0, 0])
         c66s = float(self.scaler_C66.transform([[c66]])[0, 0])
 
-        tensor_feature = np.array([c11s, c12s, c66s, vol], dtype=np.float32)
+        tensor_feature = np.array([c11s, c22s, c12s, c66s, vol], dtype=np.float32)
 
         if self.cfg_dropout:
             r = random()
             if r < 0.1:
                 tensor_feature[:] = CFG_SENTINEL  # drop everything (uncond)
             elif r < 0.2:
-                tensor_feature[0:3] = CFG_SENTINEL  # drop stiffness, keep vol
+                tensor_feature[0:4] = CFG_SENTINEL  # drop stiffness, keep vol
             elif r < 0.3:
-                tensor_feature[3] = CFG_SENTINEL    # drop vol, keep stiffness
+                tensor_feature[4] = CFG_SENTINEL    # drop vol, keep stiffness
 
         return {
             "occupancy": torch.from_numpy(occ),

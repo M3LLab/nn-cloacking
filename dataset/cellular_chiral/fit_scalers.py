@@ -1,8 +1,8 @@
-"""Fit per-channel StandardScalers on (C11, C12, C66) from stiffness.h5.
+"""Fit per-channel StandardScalers on (C11, C22, C12, C66) from stiffness.h5.
 
-Matches the 3D pipeline's naming (`scaler_C11`, `scaler_C12`, `scaler_C66`) so
-the 2D diffusion code can reuse the same joblib filenames. `vol` is left in raw
-[0, 1] units (the 3D pipeline does the same).
+Matches the dataset's orthotropic (D2) naming (`scaler_C11`, `scaler_C22`,
+`scaler_C12`, `scaler_C66`) so the 2D diffusion code can reuse the same joblib
+filenames. `vol` is left in raw [0, 1] units (the 3D pipeline does the same).
 
 Usage:
 
@@ -31,14 +31,14 @@ def main() -> None:
     parser.add_argument(
         "-o", "--output", type=Path,
         default=Path("microstructure_generation_2d"),
-        help="Directory for scaler_C11 / scaler_C12 / scaler_C66 joblib files",
+        help="Directory for scaler_C11 / scaler_C22 / scaler_C12 / scaler_C66 joblib files",
     )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(args.input, "r") as f:
-        for name in ("C11", "C12", "C66"):
+        for name in ("C11", "C22", "C12", "C66"):
             arr = f[name][:].astype(np.float64).reshape(-1, 1)
             scaler = StandardScaler().fit(arr)
             out_path = args.output / f"scaler_{name}"

@@ -2,10 +2,10 @@
 validation set.
 
 For every val sample the script:
-  1. Generates one diffusion sample conditioned on (C11, C12, C66, vol).
+  1. Generates one diffusion sample conditioned on (C11, C22, C12, C66, vol).
   2. Runs FEM to get its realised stiffness.
   3. Finds the nearest neighbour in the training set (L2 in z-scored feature
-     space: scaled C11/C12/C66 + z-scored vol).
+     space: scaled C11/C22/C12/C66 + z-scored vol).
   4. Saves a side-by-side PNG: [Val target | Generated | Nearest neighbour].
 
 Outputs
@@ -13,6 +13,7 @@ Outputs
   <output_dir>/comparison.csv   columns:
       comparison_id, val_idx, nn_idx,
       C11, C11_generated, C11_dataset,
+      C22, C22_generated, C22_dataset,
       C12, C12_generated, C12_dataset,
       C66, C66_generated, C66_dataset,
       vol, vol_generated, vol_dataset
@@ -55,6 +56,7 @@ from .network.model_trainer import DiffusionModel
 CSV_FIELDS = [
     "comparison_id", "val_idx", "nn_idx",
     "C11", "C11_generated", "C11_dataset",
+    "C22", "C22_generated", "C22_dataset",
     "C12", "C12_generated", "C12_dataset",
     "C66", "C66_generated", "C66_dataset",
     "vol", "vol_generated", "vol_dataset",
@@ -79,38 +81,40 @@ def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
     return _crop(arr)
 
 
-def _run_fem(cell_uint8: np.ndarray) -> tuple[float, float, float, float]:
+def _run_fem(cell_uint8: np.ndarray) -> tuple[float, float, float, float, float]:
     from dataset.cellular_chiral.bulk_stiffness import (
-        _compute_stiffness, _d4_params_from_C,
+        _compute_stiffness, _ortho_params_from_C,
     )
     C, _, vf = _compute_stiffness(cell_uint8.astype(np.int8))
-    C11, C12, C66 = _d4_params_from_C(C)
-    return float(C11), float(C12), float(C66), float(vf)
+    C11, C22, C12, C66 = _ortho_params_from_C(C)
+    return float(C11), float(C22), float(C12), float(C66), float(vf)
 
 
 def _scale_features(
     C11: np.ndarray,
+    C22: np.ndarray,
     C12: np.ndarray,
     C66: np.ndarray,
     vol: np.ndarray,
-    sc11, sc12, sc66,
+    sc11, sc22, sc12, sc66,
 ) -> np.ndarray:
-    """Return (N, 4) array with all features z-scored."""
+    """Return (N, 5) array with all features z-scored."""
     s11 = sc11.transform(C11.reshape(-1, 1)).ravel()
+    s22 = sc22.transform(C22.reshape(-1, 1)).ravel()
     s12 = sc12.transform(C12.reshape(-1, 1)).ravel()
     s66 = sc66.transform(C66.reshape(-1, 1)).ravel()
     sv  = (vol - VOL_MEAN) / VOL_STD
-    return np.column_stack([s11, s12, s66, sv]).astype(np.float32)
+    return np.column_stack([s11, s22, s12, s66, sv]).astype(np.float32)
 
 
 def _load_train_features(
     h5_path: str,
     train_indices: list[int],
-    sc11, sc12, sc66,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    sc11, sc22, sc12, sc66,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Load and scale training-set stiffness features.
 
-    Returns (features (N,4), C11, C12, C66, vol) for all train indices,
+    Returns (features (N,5), C11, C22, C12, C66, vol) for all train indices,
     in the same order as train_indices.
     """
     idx = np.asarray(train_indices, dtype=np.int64)
@@ -120,17 +124,19 @@ def _load_train_features(
 
     with h5py.File(h5_path, "r") as f:
         C11_all = np.asarray(f["C11"])
+        C22_all = np.asarray(f["C22"])
         C12_all = np.asarray(f["C12"])
         C66_all = np.asarray(f["C66"])
         vol_all = np.asarray(f["vol"])
 
     C11 = C11_all[sorted_idx][inv_ord]
+    C22 = C22_all[sorted_idx][inv_ord]
     C12 = C12_all[sorted_idx][inv_ord]
     C66 = C66_all[sorted_idx][inv_ord]
     vol = vol_all[sorted_idx][inv_ord]
 
-    feats = _scale_features(C11, C12, C66, vol, sc11, sc12, sc66)
-    return feats, C11, C12, C66, vol
+    feats = _scale_features(C11, C22, C12, C66, vol, sc11, sc22, sc12, sc66)
+    return feats, C11, C22, C12, C66, vol
 
 
 def _find_nn(query_feat: np.ndarray, train_feats: np.ndarray) -> int:
@@ -168,6 +174,7 @@ def _save_image(
     def fmt_errs(prefix: str) -> str:
         return (
             f"C11={_rel_err(row[f'C11_{prefix}'], row['C11']):.1%}  "
+            f"C22={_rel_err(row[f'C22_{prefix}'], row['C22']):.1%}  "
             f"C12={_rel_err(row[f'C12_{prefix}'], row['C12']):.1%}  "
             f"C66={_rel_err(row[f'C66_{prefix}'], row['C66']):.1%}  "
             f"vol={abs(row[f'vol_{prefix}'] - row['vol']):.3f}"
@@ -175,7 +182,7 @@ def _save_image(
 
     fig.suptitle(
         f"id={row['comparison_id']}  val_idx={row['val_idx']}  "
-        f"C11={row['C11']:.2e}  C12={row['C12']:.2e}  "
+        f"C11={row['C11']:.2e}  C22={row['C22']:.2e}  C12={row['C12']:.2e}  "
         f"C66={row['C66']:.2e}  vol={row['vol']:.3f}\n"
         f"Gen  rel-err: {fmt_errs('generated')}\n"
         f"NN   rel-err: {fmt_errs('dataset')}",
@@ -236,6 +243,7 @@ def main() -> None:
 
     # ---- scalers ----
     sc11 = joblib.load(scaler_dir / "scaler_C11")
+    sc22 = joblib.load(scaler_dir / "scaler_C22")
     sc12 = joblib.load(scaler_dir / "scaler_C12")
     sc66 = joblib.load(scaler_dir / "scaler_C66")
 
@@ -255,8 +263,8 @@ def main() -> None:
 
     # ---- build NN feature matrix ----
     print("Loading train features for NN search...")
-    train_feats, tr_C11, tr_C12, tr_C66, tr_vol = _load_train_features(
-        args.h5, train_indices, sc11, sc12, sc66,
+    train_feats, tr_C11, tr_C22, tr_C12, tr_C66, tr_vol = _load_train_features(
+        args.h5, train_indices, sc11, sc22, sc12, sc66,
     )
     train_indices_arr = np.asarray(train_indices, dtype=np.int64)
 
@@ -292,6 +300,7 @@ def main() -> None:
             # -- load val sample --
             val_cell = _load_cell(h5, val_h5_idx)
             c11  = float(h5["C11"][val_h5_idx])
+            c22  = float(h5["C22"][val_h5_idx])
             c12  = float(h5["C12"][val_h5_idx])
             c66  = float(h5["C66"][val_h5_idx])
             vol  = float(h5["vol"][val_h5_idx])
@@ -299,6 +308,7 @@ def main() -> None:
             # -- scaled conditioning vector (same as training) --
             tf = np.array([
                 float(sc11.transform([[c11]])[0, 0]),
+                float(sc22.transform([[c22]])[0, 0]),
                 float(sc12.transform([[c12]])[0, 0]),
                 float(sc66.transform([[c66]])[0, 0]),
                 vol,
@@ -317,11 +327,12 @@ def main() -> None:
             gen_cell = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
 
             # -- FEM on generated --
-            c11_gen, c12_gen, c66_gen, vol_gen = _run_fem(gen_cell)
+            c11_gen, c22_gen, c12_gen, c66_gen, vol_gen = _run_fem(gen_cell)
 
             # -- nearest neighbour --
             query = np.array([
                 float(sc11.transform([[c11]])[0, 0]),
+                float(sc22.transform([[c22]])[0, 0]),
                 float(sc12.transform([[c12]])[0, 0]),
                 float(sc66.transform([[c66]])[0, 0]),
                 (vol - VOL_MEAN) / VOL_STD,
@@ -330,6 +341,7 @@ def main() -> None:
             nn_h5_idx  = int(train_indices_arr[nn_pos])
             nn_cell    = _load_cell(h5, nn_h5_idx)
             c11_nn = float(tr_C11[nn_pos])
+            c22_nn = float(tr_C22[nn_pos])
             c12_nn = float(tr_C12[nn_pos])
             c66_nn = float(tr_C66[nn_pos])
             vol_nn = float(tr_vol[nn_pos])
@@ -342,6 +354,9 @@ def main() -> None:
                 "C11":            c11,
                 "C11_generated":  c11_gen,
                 "C11_dataset":    c11_nn,
+                "C22":            c22,
+                "C22_generated":  c22_gen,
+                "C22_dataset":    c22_nn,
                 "C12":            c12,
                 "C12_generated":  c12_gen,
                 "C12_dataset":    c12_nn,

@@ -34,7 +34,7 @@ from .model_utils import (
 from .unet import UNetModel
 
 TRUNCATED_TIME = 0.7
-TENSOR_DIM = 4  # (C11, C12, C66, vol)
+TENSOR_DIM = 5  # (C11, C22, C12, C66, vol)
 _CELL_SIZE = 50
 _PAD_TO = 64
 _OFF = (_PAD_TO - _CELL_SIZE) // 2  # 7-pixel void border for legacy 64x64 mode

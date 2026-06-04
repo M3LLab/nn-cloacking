@@ -12,7 +12,7 @@ Adapted from microstructure_generation_3d/network/unet.py. Key differences:
   Upsample is instantiated with the matching down-side target size.
 - Attention placement is configured by spatial size via `attention_sizes`
   (a set of int H values), not by downsample-factor `attention_resolutions`.
-- `tensor_condition_dim` is 4 (C11, C12, C66, vol).
+- `tensor_condition_dim` is 5 (C11, C22, C12, C66, vol); vol is the last channel.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class UNetModel(nn.Module):
         attention_sizes=(4, 8),
         with_attention: bool = True,
         verbose: bool = False,
-        tensor_condition_dim: int = 4,
+        tensor_condition_dim: int = 5,
         use_tensor_condition: bool = True,
     ):
         super().__init__()
@@ -192,8 +192,8 @@ class UNetModel(nn.Module):
         tensor_emb = None
         if self.use_tensor_condition:
             tensor_emb = self._build_tensor_emb(tensor_condition, x.device, t_emb.dtype)
-            # 4th channel (vol) is used by mid_cross_attn2 as a token sequence
-            vol_condition = tensor_emb[:, :, 3:4].permute(0, 2, 1)
+            # last channel (vol) is used by mid_cross_attn2 as a token sequence
+            vol_condition = tensor_emb[:, :, -1:].permute(0, 2, 1)
 
         h = []
         for resnet, _ca, _ca2, self_attn, downsample in self.downs:

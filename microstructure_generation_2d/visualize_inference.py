@@ -2,13 +2,13 @@
 plot the generated cells side-by-side with the dataset originals.
 
 Conditions and ground-truth cells are pulled from ``stiffness.h5`` (defaults to
-the validation indices in ``split.json``). For each condition the scaled 4-dim
-vector (C11, C12, C66, vol) is reconstructed exactly as the training dataset
+the validation indices in ``split.json``). For each condition the scaled 5-dim
+vector (C11, C22, C12, C66, vol) is reconstructed exactly as the training dataset
 does, then fed to ``sample_with_tensor``.
 
 Without ``--fem``: saves a single inference grid (current behaviour).
 With ``--fem``: saves one figure per condition showing side-by-side images and
-a bar-chart comparing dataset vs FEM-realised (C11, C12, C66, vol).
+a bar-chart comparing dataset vs FEM-realised (C11, C22, C12, C66, vol).
 
 Usage:
 
@@ -70,6 +70,7 @@ def _pick_indices(split: dict, n: int, source: str, seed: int) -> list[int]:
 
 def _load_conditions(h5_path: str, scaler_dir: Path, indices: list[int]):
     scaler_C11 = joblib.load(scaler_dir / "scaler_C11")
+    scaler_C22 = joblib.load(scaler_dir / "scaler_C22")
     scaler_C12 = joblib.load(scaler_dir / "scaler_C12")
     scaler_C66 = joblib.load(scaler_dir / "scaler_C66")
 
@@ -77,16 +78,19 @@ def _load_conditions(h5_path: str, scaler_dir: Path, indices: list[int]):
     with h5py.File(h5_path, "r") as f:
         cells = f["cells"]
         C11 = f["C11"]
+        C22 = f["C22"]
         C12 = f["C12"]
         C66 = f["C66"]
         vol = f["vol"]
         for h_idx in indices:
             c11 = float(C11[h_idx])
+            c22 = float(C22[h_idx])
             c12 = float(C12[h_idx])
             c66 = float(C66[h_idx])
             v = float(vol[h_idx])
             tf = np.array([
                 float(scaler_C11.transform([[c11]])[0, 0]),
+                float(scaler_C22.transform([[c22]])[0, 0]),
                 float(scaler_C12.transform([[c12]])[0, 0]),
                 float(scaler_C66.transform([[c66]])[0, 0]),
                 v,
@@ -94,7 +98,7 @@ def _load_conditions(h5_path: str, scaler_dir: Path, indices: list[int]):
             rows.append({
                 "idx": int(h_idx),
                 "cell": np.asarray(cells[h_idx], dtype=np.uint8),  # (50, 50)
-                "C11": c11, "C12": c12, "C66": c66, "vol": v,
+                "C11": c11, "C22": c22, "C12": c12, "C66": c66, "vol": v,
                 "tensor_feature": tf,
             })
     return rows
@@ -104,6 +108,7 @@ def _format_label(row: dict) -> str:
     return (
         f"idx={row['idx']}\n"
         f"C11={row['C11']:.2e}\n"
+        f"C22={row['C22']:.2e}\n"
         f"C12={row['C12']:.2e}\n"
         f"C66={row['C66']:.2e}\n"
         f"vol={row['vol']:.3f}"
@@ -117,11 +122,11 @@ def _format_label(row: dict) -> str:
 def _run_fem(cell_uint8: np.ndarray) -> dict:
     """FEM homogenization on a single (50, 50) uint8 cell. Lazy import."""
     from dataset.cellular_chiral.bulk_stiffness import (
-        _compute_stiffness, _d4_params_from_C,
+        _compute_stiffness, _ortho_params_from_C,
     )
     C, _rho, vf = _compute_stiffness(cell_uint8.astype(np.int8))
-    C11, C12, C66 = _d4_params_from_C(C)
-    return {"C11": C11, "C12": C12, "C66": C66, "vf": vf}
+    C11, C22, C12, C66 = _ortho_params_from_C(C)
+    return {"C11": C11, "C22": C22, "C12": C12, "C66": C66, "vf": vf}
 
 
 # ---------------------------------------------------------------------------
@@ -153,15 +158,15 @@ def _bar_pair(ax, ds_val: float, gen_val: float, label: str, fmt: str) -> None:
 
 
 def _plot_fem_figure(row: dict, i: int, out_dir: Path) -> Path:
-    """One figure per condition: images (top) + 4 param bars (bottom)."""
-    fig = plt.figure(figsize=(11, 6))
+    """One figure per condition: images (top) + 5 param bars (bottom)."""
+    fig = plt.figure(figsize=(13, 6))
     gs_top = gridspec.GridSpec(
         1, 2, figure=fig,
         left=0.03, right=0.45, top=0.88, bottom=0.38,
         wspace=0.08,
     )
     gs_bot = gridspec.GridSpec(
-        1, 4, figure=fig,
+        1, 5, figure=fig,
         left=0.06, right=0.97, top=0.32, bottom=0.08,
         wspace=0.45,
     )
@@ -169,9 +174,10 @@ def _plot_fem_figure(row: dict, i: int, out_dir: Path) -> Path:
     ax_ds  = fig.add_subplot(gs_top[0, 0])
     ax_gen = fig.add_subplot(gs_top[0, 1])
     ax_c11 = fig.add_subplot(gs_bot[0, 0])
-    ax_c12 = fig.add_subplot(gs_bot[0, 1])
-    ax_c66 = fig.add_subplot(gs_bot[0, 2])
-    ax_vol = fig.add_subplot(gs_bot[0, 3])
+    ax_c22 = fig.add_subplot(gs_bot[0, 1])
+    ax_c12 = fig.add_subplot(gs_bot[0, 2])
+    ax_c66 = fig.add_subplot(gs_bot[0, 3])
+    ax_vol = fig.add_subplot(gs_bot[0, 4])
 
     # --- images ---
     for ax, cell, title in (
@@ -185,13 +191,14 @@ def _plot_fem_figure(row: dict, i: int, out_dir: Path) -> Path:
     # --- parameter bars ---
     fem = row["fem"]
     _bar_pair(ax_c11, row["C11"],  fem["C11"], "C11 (Pa)", "%.2e")
+    _bar_pair(ax_c22, row["C22"],  fem["C22"], "C22 (Pa)", "%.2e")
     _bar_pair(ax_c12, row["C12"],  fem["C12"], "C12 (Pa)", "%.2e")
     _bar_pair(ax_c66, row["C66"],  fem["C66"], "C66 (Pa)", "%.2e")
     _bar_pair(ax_vol, row["vol"],  fem["vf"],  "vol",      "%.3f")
 
     fig.suptitle(
         f"idx={row['idx']}   "
-        f"C11={row['C11']:.2e}  C12={row['C12']:.2e}  "
+        f"C11={row['C11']:.2e}  C22={row['C22']:.2e}  C12={row['C12']:.2e}  "
         f"C66={row['C66']:.2e}  vol={row['vol']:.3f}",
         fontsize=9, y=0.97,
     )

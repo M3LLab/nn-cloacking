@@ -1,7 +1,7 @@
 """Generate 50x50 binary unit cells from a trained 2D diffusion checkpoint and
 evaluate the realised stiffness via FEM round-trip.
 
-Targets are read from a CSV with columns ``C11,C12,C66,vol`` (header row).
+Targets are read from a CSV with columns ``C11,C22,C12,C66,vol`` (header row).
 Use ``-1`` (the CFG sentinel) to leave a channel unconstrained.
 
 Usage:
@@ -47,43 +47,46 @@ def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
 
 
 def _scale_targets(row: dict, scaler_dir: Path) -> np.ndarray:
-    """Convert a {C11,C12,C66,vol} dict into the scaled 4-dim tensor used by
+    """Convert a {C11,C22,C12,C66,vol} dict into the scaled 5-dim tensor used by
     the model. Values equal to CFG_SENTINEL (-1) are passed through unchanged.
     """
     scalers = {
         "C11": joblib.load(scaler_dir / "scaler_C11"),
+        "C22": joblib.load(scaler_dir / "scaler_C22"),
         "C12": joblib.load(scaler_dir / "scaler_C12"),
         "C66": joblib.load(scaler_dir / "scaler_C66"),
     }
-    tf = np.empty(4, dtype=np.float32)
-    for i, name in enumerate(("C11", "C12", "C66")):
+    names = ("C11", "C22", "C12", "C66")
+    tf = np.empty(len(names) + 1, dtype=np.float32)
+    for i, name in enumerate(names):
         v = float(row[name])
         if v == CFG_SENTINEL:
             tf[i] = CFG_SENTINEL
         else:
             tf[i] = float(scalers[name].transform([[v]])[0, 0])
-    tf[3] = float(row["vol"])  # vol left raw; -1 means drop
+    tf[-1] = float(row["vol"])  # vol left raw; -1 means drop
     return tf
 
 
 def _fem_roundtrip(cells_50: np.ndarray) -> list[dict]:
     """Run periodic homogenization on each (50,50) uint8 cell. Returns one
-    dict per cell with realised (C11, C12, C66, vf), or a non-None ``error``.
+    dict per cell with realised (C11, C22, C12, C66, vf), or a non-None ``error``.
 
     Imported lazily because jax-fem prints a banner on import and is slow.
     """
     from dataset.cellular_chiral.bulk_stiffness import (
-        _compute_stiffness, _d4_params_from_C,
+        _compute_stiffness, _ortho_params_from_C,
     )
     results = []
     for cell in tqdm(cells_50, desc="FEM eval", unit="cell"):
         try:
             C, rho, vf = _compute_stiffness(cell.astype(np.int8))
-            C11, C12, C66 = _d4_params_from_C(C)
-            results.append({"C11": C11, "C12": C12, "C66": C66, "vf": vf, "error": None})
+            C11, C22, C12, C66 = _ortho_params_from_C(C)
+            results.append({"C11": C11, "C22": C22, "C12": C12, "C66": C66,
+                            "vf": vf, "error": None})
         except Exception as exc:  # noqa: BLE001
-            results.append({"C11": None, "C12": None, "C66": None, "vf": None,
-                            "error": f"{type(exc).__name__}: {exc}"})
+            results.append({"C11": None, "C22": None, "C12": None, "C66": None,
+                            "vf": None, "error": f"{type(exc).__name__}: {exc}"})
     return results
 
 
@@ -92,7 +95,7 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ckpt", required=True, help="Lightning .ckpt path")
     parser.add_argument("--targets", required=True,
-                        help="CSV with columns C11,C12,C66,vol")
+                        help="CSV with columns C11,C22,C12,C66,vol")
     parser.add_argument("--scaler-dir", default="microstructure_generation_2d")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--num-per-target", type=int, default=4)
@@ -173,11 +176,11 @@ def main() -> None:
 
 
 def _summary_stats(rows, fem, num_per_target):
-    """Per-target relative error vs requested (C11, C12, C66, vol)."""
+    """Per-target relative error vs requested (C11, C22, C12, C66, vol)."""
     out = []
     for tgt_i, row in enumerate(rows):
         block = fem[tgt_i * num_per_target : (tgt_i + 1) * num_per_target]
-        for k in ("C11", "C12", "C66"):
+        for k in ("C11", "C22", "C12", "C66"):
             tv = float(row[k])
             if tv == CFG_SENTINEL:
                 continue
