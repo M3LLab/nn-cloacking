@@ -2,14 +2,19 @@
 
 Reads ``cells.npy`` and ``live_fractions.npy`` produced by
 ``dataset.cellular_chiral.bulk_generate``, runs FEM homogenization on every
-unique cell, and writes the three independent D4-class stiffness parameters
-(C11, C12, C66) plus effective density, the full augmented Voigt stiffness,
-and the binary geometry to one HDF5 file.
+unique cell, and writes the four independent orthotropic (D2-class) stiffness
+parameters (C11, C22, C12, C66) plus effective density, the full augmented
+Voigt stiffness, and the binary geometry to one HDF5 file.
+
+The squared (mirror) assembly has two orthogonal mirror axes -- point group D2,
+NOT D4 -- so the two axial stiffnesses C11 (x) and C22 (y) differ in general
+(median C11/C22 ratio ~2x in ca_bulk_squared). They are stored separately; do
+NOT assume C11 == C22.
 
 The fields ``lambda_`` and ``mu`` are also written for backward compatibility
 with older readers; they alias ``C12`` and ``C66`` respectively. Be aware
-those names assume isotropy that does NOT hold for generic D4 cells -- use
-``C11/C12/C66`` directly when you need the full elastic response.
+those names assume isotropy that does NOT hold for these cells -- use
+``C11/C22/C12/C66`` directly when you need the full elastic response.
 
 Identical and "really similar" geometries are filtered out: a cell is skipped
 if its raw bytes (exact match) or its block-pooled fingerprint (near-duplicate
@@ -132,25 +137,28 @@ def _compute_stiffness(
     return C_eff, rho_eff, vf
 
 
-def _d4_params_from_C(C: np.ndarray) -> tuple[float, float, float]:
-    """Extract the three independent D4-class stiffness constants.
+def _ortho_params_from_C(C: np.ndarray) -> tuple[float, float, float, float]:
+    """Extract the four independent orthotropic (D2-class) stiffness constants.
 
     Augmented Voigt order is [sigma_11, sigma_22, sigma_12, sigma_21] vs
-    [e_11, e_22, e_12, e_21]. For a D4-symmetric (squared-assembly) cell the
-    effective stiffness has exactly 3 independent entries:
-        C11 = C[0,0] = C[1,1]   (axial)
-        C12 = C[0,1] = C[1,0]   (lateral coupling)
+    [e_11, e_22, e_12, e_21]. The squared (mirror) assembly is symmetric about
+    both the x and y center lines -- point group D2 -- which zeroes the
+    axial<->shear coupling but does NOT force C11 == C22. The four independent
+    entries are:
+        C11 = C[0,0]            (x-axial)
+        C22 = C[1,1]            (y-axial)  -- distinct from C11 for D2
+        C12 = C[0,1] = C[1,0]   (lateral coupling; equal by major symmetry)
         C66 = C[2,2] = C[3,3]   (engineering shear)
-    We average each equivalent pair to dampen FEM numerical noise.
-
-    Isotropy is the additional constraint  C66 == (C11 - C12) / 2.
-    For random CA cells this generally does NOT hold (median Zener ratio
-    ~0.14 in the ca_bulk_squared dataset), so all three numbers are needed.
+    C12 and C66 average their physically-equal pairs to dampen FEM numerical
+    noise. C11 and C22 are kept raw because they are genuinely different
+    quantities (median C11/C22 ratio ~2x in ca_bulk_squared) -- averaging them,
+    as the earlier D4 assumption did, discarded the dominant in-plane anisotropy.
     """
-    C11 = 0.5 * (C[0, 0] + C[1, 1])
+    C11 = float(C[0, 0])
+    C22 = float(C[1, 1])
     C12 = 0.5 * (C[0, 1] + C[1, 0])
     C66 = 0.5 * (C[2, 2] + C[3, 3])
-    return float(C11), float(C12), float(C66)
+    return C11, C22, float(C12), float(C66)
 
 
 # ---------------------------------------------------------------------------
@@ -198,14 +206,14 @@ def _create_datasets(f: h5py.File, img_shape: tuple[int, int]) -> None:
         compression_opts=4,
     )
     f.create_dataset("C_eff", shape=(0, 4, 4), maxshape=(None, 4, 4), dtype=np.float64, chunks=(CHUNK, 4, 4))
-    for name in ("C11", "C12", "C66", "lambda_", "mu", "rho", "vf", "vol", "live_fraction"):
+    for name in ("C11", "C22", "C12", "C66", "lambda_", "mu", "rho", "vf", "vol", "live_fraction"):
         f.create_dataset(name, shape=(0,), maxshape=(None,), dtype=np.float64, chunks=(CHUNK,))
     f.create_dataset("source_idx", shape=(0,), maxshape=(None,), dtype=np.int64, chunks=(CHUNK,))
 
     f.attrs["E_cement"] = E_CEMENT
     f.attrs["nu"] = NU
     f.attrs["voigt_order"] = "[sigma_11, sigma_22, sigma_12, sigma_21]"
-    f.attrs["stiffness_params"] = "C11, C12, C66 (D4 class, 2D)"
+    f.attrs["stiffness_params"] = "C11, C22, C12, C66 (orthotropic D2 class, 2D)"
     f.attrs["lame_aliases"] = "lambda_ := C12, mu := C66 (back-compat; assume isotropy)"
 
 
@@ -214,6 +222,7 @@ def _append(
     cell: np.ndarray,
     C: np.ndarray,
     C11: float,
+    C22: float,
     C12: float,
     C66: float,
     rho: float,
@@ -222,12 +231,13 @@ def _append(
     src_idx: int,
 ) -> None:
     idx = f["C_eff"].shape[0]
-    for key in ("cells", "C_eff", "C11", "C12", "C66", "lambda_", "mu",
+    for key in ("cells", "C_eff", "C11", "C22", "C12", "C66", "lambda_", "mu",
                 "rho", "vf", "vol", "live_fraction", "source_idx"):
         f[key].resize(idx + 1, axis=0)
     f["cells"][idx] = cell.astype(np.uint8)
     f["C_eff"][idx] = C
     f["C11"][idx] = C11
+    f["C22"][idx] = C22
     f["C12"][idx] = C12
     f["C66"][idx] = C66
     f["lambda_"][idx] = C12  # back-compat alias (would-be lambda if isotropic)
@@ -556,8 +566,8 @@ def main() -> None:
                     failed_src.append(src_idx)
                     continue
 
-                C11, C12, C66 = _d4_params_from_C(C)
-                _append(f, cell, C, C11, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
+                C11, C22, C12, C66 = _ortho_params_from_C(C)
+                _append(f, cell, C, C11, C22, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
                 accepted_src.append(src_idx)
                 if f["C_eff"].shape[0] % CHUNK == 0:
                     f.flush()
@@ -586,8 +596,8 @@ def main() -> None:
                 for src_idx, C, rho, vf, err in pbar:
                     if err is None:
                         cell = np.asarray(cells[src_idx], dtype=np.uint8)
-                        C11, C12, C66 = _d4_params_from_C(C)
-                        _append(f, cell, C, C11, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
+                        C11, C22, C12, C66 = _ortho_params_from_C(C)
+                        _append(f, cell, C, C11, C22, C12, C66, rho, vf, float(live_fractions[src_idx]), src_idx)
                         accepted_src.append(src_idx)
                         if f["C_eff"].shape[0] % CHUNK == 0:
                             f.flush()

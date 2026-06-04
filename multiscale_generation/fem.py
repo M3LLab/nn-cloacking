@@ -25,7 +25,7 @@ os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jax_fem.solver import solver as jax_fem_solver
+from jax_fem.solver import ad_wrapper, solver as jax_fem_solver
 
 from rayleigh_cloak.absorbing import make_xi_profile
 from rayleigh_cloak.cells import CellDecomposition
@@ -88,6 +88,25 @@ def tile_image(geoms: np.ndarray, n_x: int, n_y: int) -> np.ndarray:
     return canvas
 
 
+# ── SIMP-soft material interpolation (shared by forward + differentiable paths) ──
+
+
+def _simp_frac(occ, void_ratio, simp_p, binarize):
+    """Stiffness fraction in ``[void_ratio, 1]`` (SIMP-soft, differentiable in occ)."""
+    if binarize:
+        occ = jnp.where(occ > 0.5, 1.0, 0.0)
+    occ = jnp.clip(occ, 0.0, 1.0)
+    return void_ratio + (1.0 - void_ratio) * occ ** simp_p
+
+
+def _density_frac(occ, void_ratio, binarize):
+    """Density fraction in ``[void_ratio, 1]`` (linear in occ; matches ersatz void)."""
+    if binarize:
+        occ = jnp.where(occ > 0.5, 1.0, 0.0)
+    occ = jnp.clip(occ, 0.0, 1.0)
+    return void_ratio + (1.0 - void_ratio) * occ
+
+
 # ── pixel-level FEM problem (SIMP-soft material) ────────────────────
 
 
@@ -106,59 +125,60 @@ class PixelMaterialProblem(RayleighCloakProblem):
 
     def custom_init(self):
         geo = self._geometry
-        C0 = self._C0
-        rho0 = self._rho0
         canvas = type(self)._canvas_jnp                  # (H_pix, W_pix)
         x_min, x_max, y_min, y_max = type(self)._cloak_bbox
         H_pix, W_pix = canvas.shape
-        void_ratio = type(self)._void_ratio
-        simp_p = type(self)._simp_p
-        binarize = type(self)._binarize
         xi_fn = type(self).__dict__["_xi_fn"]
 
+        # Precompute the quad-point → pixel gather (constant: depends on the quad
+        # points and bbox, not on canvas *values*), so ``set_params(canvas)`` is a
+        # plain differentiable gather. Mirrors the y-up convention of ``tile_image``
+        # (top of image = high y, hence the ``1 - y_norm`` row flip).
+        pts = np.asarray(self.physical_quad_points)      # (n_fem, n_qp, 2)
         inv_dx = 1.0 / (x_max - x_min)
         inv_dy = 1.0 / (y_max - y_min)
+        x_norm = (pts[..., 0] - x_min) * inv_dx
+        y_norm = (pts[..., 1] - y_min) * inv_dy
+        col = np.clip((x_norm * W_pix).astype(np.int32), 0, W_pix - 1)
+        row = np.clip(((1.0 - y_norm) * H_pix).astype(np.int32), 0, H_pix - 1)
+        self._row_idx = jnp.asarray(row)                 # (n_fem, n_qp) int
+        self._col_idx = jnp.asarray(col)
 
-        def _occ_at(x):
-            # Canvas tiled y-up (top of image = high y), so flip y for the row.
-            x_norm = (x[0] - x_min) * inv_dx
-            y_norm = (x[1] - y_min) * inv_dy
-            col = jnp.clip((x_norm * W_pix).astype(jnp.int32), 0, W_pix - 1)
-            row = jnp.clip(((1.0 - y_norm) * H_pix).astype(jnp.int32), 0, H_pix - 1)
-            return canvas[row, col]
+        # In-cloak mask at quad points (constant). Outside the cloak the material
+        # is the solid background (C0, rho0) regardless of the canvas.
+        self._in_clk_qp = jax.vmap(jax.vmap(geo.in_cloak))(self.physical_quad_points)
 
-        def _frac(occ):
-            # SIMP-soft material fraction in [void_ratio, 1]; differentiable in occ.
-            if binarize:
-                occ = jnp.where(occ > 0.5, 1.0, 0.0)
-            occ = jnp.clip(occ, 0.0, 1.0)
-            return void_ratio + (1.0 - void_ratio) * occ ** simp_p
+        # Absorbing profile (constant), stored separately for set_params.
+        self._xi_qp = jax.vmap(jax.vmap(xi_fn))(self.physical_quad_points)
 
-        def _C_eff_pt(x):
-            in_clk = geo.in_cloak(x)
-            C_pixel = _frac(_occ_at(x)) * C0
-            return jnp.where(in_clk, C_pixel, C0)
+        # Build the initial material from the canvas the problem was created with.
+        self.set_params(canvas)
 
-        def _rho_eff_pt(x):
-            in_clk = geo.in_cloak(x)
-            # Density is linear in occupancy (no SIMP power), matching ersatz void.
-            occ = _occ_at(x)
-            if binarize:
-                occ = jnp.where(occ > 0.5, 1.0, 0.0)
-            occ = jnp.clip(occ, 0.0, 1.0)
-            rho_pixel = (void_ratio + (1.0 - void_ratio) * occ) * rho0
-            return jnp.where(in_clk, rho_pixel, rho0)
+    def set_params(self, canvas):
+        """Rebuild ``internal_vars`` from a pixel ``canvas`` (differentiable).
 
-        xi_qp = jax.vmap(jax.vmap(xi_fn))(self.physical_quad_points)
-        self._xi_qp = xi_qp
-        self.internal_vars = [
-            jax.vmap(jax.vmap(_C_eff_pt))(self.physical_quad_points),
-            jax.vmap(jax.vmap(_rho_eff_pt))(self.physical_quad_points),
-            xi_qp,
-        ]
+        The quad-point→pixel indices, in-cloak mask, and absorbing profile are
+        precomputed in ``custom_init``; only the SIMP-soft material assignment
+        depends on the canvas, so the gather ``canvas[row_idx, col_idx]`` (constant
+        indices) carries gradients w.r.t. the canvas *values*. This mirrors
+        ``RayleighCloakProblem.set_params`` so ``ad_wrapper`` differentiates the
+        FEM solve w.r.t. the canvas.
+        """
+        cls = type(self)
+        canvas = jnp.asarray(canvas, dtype=jnp.float32)
+        C0, rho0 = cls._C0, cls._rho0
+        void_ratio, simp_p, binarize = cls._void_ratio, cls._simp_p, cls._binarize
 
-    def set_params(self, _params):
-        pass
+        occ = canvas[self._row_idx, self._col_idx]                  # (n_fem, n_qp)
+        in_clk = self._in_clk_qp
+
+        C_pixel = _simp_frac(occ, void_ratio, simp_p, binarize)[..., None, None, None, None] * C0
+        C_qp = jnp.where(in_clk[..., None, None, None, None], C_pixel, C0)
+
+        rho_pixel = _density_frac(occ, void_ratio, binarize) * rho0
+        rho_qp = jnp.where(in_clk, rho_pixel, rho0)
+
+        self.internal_vars = [C_qp, rho_qp, self._xi_qp]
 
 
 def build_pixel_problem(
@@ -280,3 +300,121 @@ def structure_cloaking_loss(
 
     diag = {"n_nodes": len(cloak_mesh.points), "n_cells": int(cloak_mesh.cells.shape[0])}
     return loss, u_val, diag
+
+
+# ── differentiable objective: loss(canvas) -> (loss, g_canvas) ──────
+
+
+def _jnp_transmitted_ratio(u_case, u_ref_surf, case_surf_idx):
+    """jnp port of ``transmitted_displacement_ratio`` (pure, autodiff-friendly).
+
+    ``u_ref_surf`` is the reference surface displacement already indexed at the
+    matching reference nodes (a constant), so only ``u_case`` carries gradients.
+    Same surface-mean convention as the numpy metric, so the bridge loss matches
+    the ``structure_cloaking_loss`` forward value on the same canvas.
+    """
+    u_s = u_case[case_surf_idx]
+    mag_case = jnp.sqrt(u_s[:, 0]**2 + u_s[:, 1]**2 + u_s[:, 2]**2 + u_s[:, 3]**2)
+    mag_ref = jnp.sqrt(
+        u_ref_surf[:, 0]**2 + u_ref_surf[:, 1]**2
+        + u_ref_surf[:, 2]**2 + u_ref_surf[:, 3]**2
+    )
+    return jnp.mean(mag_case) / (jnp.mean(mag_ref) + 1e-30)
+
+
+@dataclass
+class PixelFEMObjective:
+    """Reusable differentiable pixel-FEM cloaking objective.
+
+    Built once per sampling trajectory: the mesh, geometry, and reference solve
+    do not depend on the canvas, so they (and the ``ad_wrapper``'d problem) are
+    set up here and only the material (canvas) changes per call. ``__call__``
+    returns ``(loss, g_canvas)`` where ``loss`` is the transmitted-displacement
+    ratio and ``g_canvas`` is its gradient w.r.t. the pixel canvas.
+    """
+    config: object
+    dp: DerivedParams
+    geometry: object
+    full_mesh: object
+    cloak_mesh: object
+    kept_nodes: np.ndarray
+    cloak_bbox: tuple
+    canvas_shape: tuple
+    case_surf_idx: jnp.ndarray
+    u_ref_surf: jnp.ndarray
+    problem: PixelMaterialProblem
+    fwd_pred: object
+    value_and_grad_canvas: object
+
+    def __call__(self, canvas):
+        """``canvas`` (H_pix, W_pix) jnp → ``(loss, g_canvas)`` (both jnp)."""
+        return self.value_and_grad_canvas(canvas)
+
+    def loss_only(self, canvas):
+        """Forward-only loss on ``canvas`` (for consistency checks)."""
+        sol_list = self.fwd_pred(jnp.asarray(canvas, dtype=jnp.float32))
+        return _jnp_transmitted_ratio(sol_list[0], self.u_ref_surf, self.case_surf_idx)
+
+
+def build_pixel_objective(
+    config,
+    cloak_bbox: tuple[float, float, float, float],
+    canvas_shape: tuple[int, int],
+    refinement_factor: int | None = None,
+    void_ratio: float = 1e-6,
+    simp_p: float = 3.0,
+    binarize: bool = False,
+    solver_opts: dict | None = None,
+) -> PixelFEMObjective:
+    """One-time setup of the differentiable pixel-FEM objective.
+
+    Builds the per-frequency mesh, reference solve, surface-eval indices, and the
+    ``ad_wrapper``'d ``PixelMaterialProblem`` (with a dummy canvas — the material
+    is supplied per call via ``set_params``). ``canvas_shape`` must match the
+    canvas the caller will pass (``(n_y*CELL, n_x*CELL)``).
+    """
+    if refinement_factor is not None:
+        config = config.model_copy(update={
+            "mesh": config.mesh.model_copy(update={"refinement_factor": int(refinement_factor)})
+        })
+    if solver_opts is None:
+        solver_opts = {"petsc_solver": {
+            "ksp_type": config.solver.ksp_type,
+            "pc_type": config.solver.pc_type,
+        }}
+
+    dp = DerivedParams.from_config(config)
+    geometry = _create_geometry(config, dp)
+
+    full_mesh = generate_mesh_full(config, dp, geometry)
+    cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
+    ref_result = solve_reference(config, mesh=full_mesh)
+
+    # Dummy canvas: only its *shape* matters here; set_params supplies real values.
+    dummy_canvas = np.zeros(canvas_shape, dtype=np.float32)
+    problem = build_pixel_problem(
+        cloak_mesh, config, dp, geometry,
+        canvas=dummy_canvas, cloak_bbox=cloak_bbox,
+        void_ratio=void_ratio, simp_p=simp_p, binarize=binarize,
+    )
+
+    cs_idx, rs_idx = _surface_indices(cloak_mesh, geometry, dp, kept_nodes, loss_cfg=config.loss)
+    case_surf_idx = jnp.asarray(cs_idx)
+    u_ref_surf = jnp.asarray(np.asarray(ref_result.u)[rs_idx])
+
+    fwd_pred = ad_wrapper(problem, solver_opts, solver_opts)
+
+    def loss_fn(canvas):
+        sol_list = fwd_pred(canvas)
+        return _jnp_transmitted_ratio(sol_list[0], u_ref_surf, case_surf_idx)
+
+    value_and_grad_canvas = jax.value_and_grad(loss_fn)
+
+    return PixelFEMObjective(
+        config=config, dp=dp, geometry=geometry,
+        full_mesh=full_mesh, cloak_mesh=cloak_mesh, kept_nodes=kept_nodes,
+        cloak_bbox=tuple(cloak_bbox), canvas_shape=tuple(canvas_shape),
+        case_surf_idx=case_surf_idx, u_ref_surf=u_ref_surf,
+        problem=problem, fwd_pred=fwd_pred,
+        value_and_grad_canvas=value_and_grad_canvas,
+    )
