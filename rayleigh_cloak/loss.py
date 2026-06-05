@@ -187,11 +187,13 @@ def transmission_loss(
     u_ref_surface: jnp.ndarray,
     surface_indices: jnp.ndarray,
 ) -> jnp.ndarray:
-    """JAX-traceable loss: squared deviation of transmission ratio from 1.
+    """JAX-traceable loss: mean per-node squared magnitude-ratio error.
 
-    Computes ``(ratio - 1)^2`` where ``ratio = <|u_cloak|> / <|u_ref|>``
-    on the surface nodes beyond the cloak.  Minimising drives the
-    transmitted wave amplitude toward the reference.
+    For each eval node, computes ``(|u_cloak_i| / |u_ref_i| - 1)^2`` and
+    averages over nodes, where ``|u| = sqrt(Re_x^2 + Re_y^2 + Im_x^2 +
+    Im_y^2)`` is the phase-invariant complex displacement magnitude.
+    Penalises amplitude mismatch at each node but ignores a global
+    complex phase shift between cloak and reference.
 
     Parameters
     ----------
@@ -201,18 +203,231 @@ def transmission_loss(
     surface_indices : node indices into u_cloak for the evaluation surface
     """
     u_s = u_cloak[surface_indices]
-    mag_cloak = jnp.sqrt(
-        u_s[:, 0]**2 + u_s[:, 1]**2 + u_s[:, 2]**2 + u_s[:, 3]**2
-    )
-    mag_ref = jnp.sqrt(
-        u_ref_surface[:, 0]**2 + u_ref_surface[:, 1]**2
-        + u_ref_surface[:, 2]**2 + u_ref_surface[:, 3]**2
-    )
-    ratio = jnp.mean(mag_cloak) / (jnp.mean(mag_ref) + 1e-30)
-    return (ratio - 1.0) ** 2
+    mag_c = jnp.sqrt(jnp.sum(u_s ** 2, axis=1))
+    mag_r = jnp.sqrt(jnp.sum(u_ref_surface ** 2, axis=1))
+    err = (mag_c / (mag_r + 1e-30) - 1.0) ** 2
+    return jnp.mean(err)
 
 
 # ── Loss resolution from config ────────────────────────────────────
+
+
+def make_fixed_depth_eval_points(
+    geometry,
+    params,
+    depth: float,
+    n_points: int,
+    noise_sigma: float = 0.0,
+    seed: int = 0,
+) -> tuple[np.ndarray, float]:
+    """Return ``(xs, y_depth)``: x-positions on a horizontal line at depth
+    ``depth`` below the free surface, optionally jittered by Gaussian noise.
+
+    Positions whose ``(x, y_depth)`` falls inside the cloak or defect footprint
+    are dropped — those are either absent from the cloak mesh (defect) or
+    measure the cloak's interior (cloak), neither of which reflects the
+    cloak's external invisibility. The kept positions are exactly those where
+    a perfect cloak would yield ``u_cloak == u_ref``.
+
+    Endpoints of ``[x_off, x_off + W]`` are excluded to avoid the right PML
+    interface and the left edge of the physical domain.
+    """
+    if depth <= 0.0:
+        raise ValueError(
+            f"depth must be > 0 (got {depth!r}); use loss.type='top_surface' "
+            f"for the free surface."
+        )
+    if depth >= float(params.H):
+        raise ValueError(
+            f"depth ({depth!r}) must be < physical height H ({params.H!r}); "
+            f"deeper lines fall in/below the bottom PML, where the field is "
+            f"attenuated and the loss is meaningless."
+        )
+    x_left = params.x_off
+    x_right = params.x_off + params.W
+    y_depth = float(params.y_top) - float(depth)
+    xs = np.linspace(x_left, x_right, n_points + 2)[1:-1]
+    if noise_sigma > 0:
+        rng = np.random.default_rng(seed)
+        xs = xs + rng.normal(0.0, float(noise_sigma), size=xs.shape)
+        xs = np.clip(xs, x_left, x_right)
+
+    keep = []
+    for x in xs:
+        pt = jnp.array([float(x), float(y_depth)])
+        if not bool(geometry.in_defect(pt)) and not bool(geometry.in_cloak(pt)):
+            keep.append(float(x))
+    if not keep:
+        raise RuntimeError(
+            f"All {n_points} depth-line eval points at depth={depth!r} fall "
+            f"inside the cloak/defect footprint. Increase n_eval_points, "
+            f"widen the domain, or pick a depth below the cloak (> b)."
+        )
+    return np.asarray(keep, dtype=np.float64), y_depth
+
+
+def find_nearest_node_indices(
+    mesh_points: np.ndarray,
+    eval_xs: np.ndarray,
+    y_target: float,
+) -> np.ndarray:
+    """For each ``x_eval``, return the cloak-mesh node index closest to
+    ``(x_eval, y_target)`` in Euclidean distance.
+
+    Used by the ``"depth_line"`` loss, which evaluates u on an interior
+    horizontal line. Unlike the embedded top-surface path, the cloak mesh is
+    not built with these positions forced — accuracy depends on local mesh
+    density at the target depth (control via
+    ``MeshConfig.refinement_factor_outside``).
+    """
+    pts = np.asarray(mesh_points)
+    out = np.empty(len(eval_xs), dtype=np.int64)
+    for i, x in enumerate(eval_xs):
+        dx = pts[:, 0] - float(x)
+        dy = pts[:, 1] - float(y_target)
+        out[i] = int(np.argmin(dx * dx + dy * dy))
+    return out
+
+
+def make_biased_depth_eval_points(
+    geometry,
+    params,
+    n_points: int,
+    alpha: float = 4.0,
+    noise_sigma: float = 0.0,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(xs, ys)``: ``M`` eval points with a surface-like x-spread but
+    pushed to a depth power-law biased toward the free surface.
+
+    The x-sampling matches :func:`make_fixed_surface_eval_points` exactly
+    (evenly spaced across ``[x_off, x_off + W]``, endpoints trimmed, optional
+    Gaussian jitter). Each point's depth below the free surface is drawn from a
+    power-law inverse-CDF so points cluster near the surface::
+
+        physical_y = y_top - H * (1 - U**(1/alpha)),   U ~ Uniform(0, 1)
+
+    ``alpha == 1`` is uniform in depth; larger ``alpha`` concentrates points
+    nearer the surface (default 4). Points whose ``(x, physical_y)`` falls
+    inside the cloak or defect footprint are dropped, so the loss measures the
+    field only *beyond / below* the cloak, never inside it (same footprint
+    filter the surface sampler uses). Raises if every point is dropped.
+    """
+    if alpha <= 0.0:
+        raise ValueError(f"alpha must be > 0 (got {alpha!r}).")
+
+    x_left = params.x_off
+    x_right = params.x_off + params.W
+    xs = np.linspace(x_left, x_right, n_points + 2)[1:-1]
+
+    rng = np.random.default_rng(seed)
+    if noise_sigma > 0:
+        xs = xs + rng.normal(0.0, float(noise_sigma), size=xs.shape)
+        xs = np.clip(xs, x_left, x_right)
+
+    y_top = float(params.y_top)
+    H = float(params.H)
+    U = rng.uniform(0.0, 1.0, size=xs.shape)
+    ys = y_top - H * (1.0 - U ** (1.0 / float(alpha)))
+
+    keep_x, keep_y = [], []
+    for x, y in zip(xs, ys):
+        pt = jnp.array([float(x), float(y)])
+        if not bool(geometry.in_defect(pt)) and not bool(geometry.in_cloak(pt)):
+            keep_x.append(float(x))
+            keep_y.append(float(y))
+    if not keep_x:
+        raise RuntimeError(
+            f"All {n_points} surface_depth eval points fall inside the "
+            f"cloak/defect footprint. Increase n_eval_points, widen the "
+            f"domain, or lower alpha."
+        )
+    return (np.asarray(keep_x, dtype=np.float64),
+            np.asarray(keep_y, dtype=np.float64))
+
+
+def make_surface_column_eval_points(
+    geometry,
+    params,
+    n_x: int,
+    n_y: int,
+    depth: float,
+    noise_sigma: float = 0.0,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(xs, ys)``: a 2-D cloud with ``n_x`` surface x-positions
+    (same selection as :func:`make_fixed_surface_eval_points`) and ``n_y``
+    y-positions per column, evenly spaced from ``y_top - depth`` up to
+    ``y_top`` (inclusive at both ends).
+
+    Pairs whose ``(x, y)`` falls inside the cloak or defect footprint are
+    dropped. The surface (``y == y_top``) row is included so the loss
+    measures the free surface plus a strip going down to ``depth``.
+
+    Returns flattened length-``n_x * n_y`` arrays (after defect/cloak
+    filtering).
+    """
+    if depth <= 0.0:
+        raise ValueError(
+            f"depth must be > 0 (got {depth!r}) for surface_column."
+        )
+    if depth >= float(params.H):
+        raise ValueError(
+            f"depth ({depth!r}) must be < physical height H ({params.H!r})."
+        )
+    if n_y < 1:
+        raise ValueError(f"n_y must be >= 1 (got {n_y!r}).")
+
+    x_left = params.x_off
+    x_right = params.x_off + params.W
+    xs_surf = np.linspace(x_left, x_right, n_x + 2)[1:-1]
+    if noise_sigma > 0:
+        rng = np.random.default_rng(seed)
+        xs_surf = xs_surf + rng.normal(0.0, float(noise_sigma), size=xs_surf.shape)
+        xs_surf = np.clip(xs_surf, x_left, x_right)
+
+    y_top = float(params.y_top)
+    ys_col = np.linspace(y_top - float(depth), y_top, int(n_y))
+
+    keep_x, keep_y = [], []
+    for x in xs_surf:
+        for y in ys_col:
+            pt = jnp.array([float(x), float(y)])
+            if bool(geometry.in_defect(pt)) or bool(geometry.in_cloak(pt)):
+                continue
+            keep_x.append(float(x))
+            keep_y.append(float(y))
+    if not keep_x:
+        raise RuntimeError(
+            f"All {n_x * n_y} surface_column eval points fall inside the "
+            f"cloak/defect footprint. Increase n_x, decrease depth, or "
+            f"widen the domain."
+        )
+    return (np.asarray(keep_x, dtype=np.float64),
+            np.asarray(keep_y, dtype=np.float64))
+
+
+def find_nearest_node_indices_xy(
+    mesh_points: np.ndarray,
+    eval_xs: np.ndarray,
+    eval_ys: np.ndarray,
+) -> np.ndarray:
+    """For each ``(x, y)`` pair, return the cloak-mesh node index closest in
+    Euclidean distance.
+
+    Used by the ``"surface_depth"`` loss, which samples an interior 2-D cloud.
+    Unlike the embedded top-surface path, the cloak mesh is not built with
+    these positions forced, so accuracy depends on local mesh density at the
+    sampled depths. Indices are static (computed once at setup), which is fine
+    for autodiff — only ``u_cloak[indices]`` is differentiated.
+    """
+    pts = np.asarray(mesh_points)
+    out = np.empty(len(eval_xs), dtype=np.int64)
+    for i in range(len(eval_xs)):
+        dx = pts[:, 0] - float(eval_xs[i])
+        dy = pts[:, 1] - float(eval_ys[i])
+        out[i] = int(np.argmin(dx * dx + dy * dy))
+    return out
 
 
 def find_embedded_eval_node_indices(
@@ -253,6 +468,56 @@ def find_embedded_eval_node_indices(
     return out
 
 
+def get_magnitude_band_indices(
+    mesh_points: np.ndarray,
+    geometry,
+    y_top: float,
+    x_left: float,
+    x_right: float,
+    depth: float,
+    mode: str = "downstream",
+    tol: float = 1e-6,
+) -> np.ndarray:
+    """Return cloak-mesh node indices in the top band ``[y_top - depth, y_top]``.
+
+    ``mode == "downstream"`` further restricts to ``x > x_c + tol`` — with
+    ``depth == 0`` this reproduces ``get_top_surface_beyond_cloak_indices``
+    exactly. ``mode == "full"`` keeps the entire physical x-range
+    ``[x_left, x_right]``. Nodes inside the cloak or defect footprint are
+    dropped in both modes (the band would otherwise reach into the cloak
+    interior for ``depth > 0``).
+    """
+    import jax
+    import jax.numpy as jnp
+
+    if depth < 0.0:
+        raise ValueError(f"depth must be >= 0 (got {depth!r}).")
+    if mode not in ("downstream", "full"):
+        raise ValueError(
+            f"Unknown band_x_filter mode: {mode!r}. "
+            f"Choose 'downstream' or 'full'."
+        )
+
+    pts = np.asarray(mesh_points)
+    y_lo = float(y_top) - float(depth)
+    in_band_y = (pts[:, 1] >= y_lo - tol) & (pts[:, 1] <= float(y_top) + tol)
+    in_phys_x = (pts[:, 0] >= float(x_left) - tol) & (
+        pts[:, 0] <= float(x_right) + tol
+    )
+    in_x = in_phys_x
+    if mode == "downstream":
+        in_x = in_x & (pts[:, 0] > float(geometry.x_c) + tol)
+
+    candidate = np.where(in_band_y & in_x)[0]
+    if len(candidate) == 0:
+        return candidate
+
+    cand_pts = jnp.array(pts[candidate, :2])
+    in_cloak = np.asarray(jax.vmap(geometry.in_cloak)(cand_pts))
+    in_defect = np.asarray(jax.vmap(geometry.in_defect)(cand_pts))
+    return candidate[~(in_cloak | in_defect)]
+
+
 def resolve_loss_target(
     loss_type: str,
     mesh_points: np.ndarray,
@@ -273,6 +538,11 @@ def resolve_loss_target(
         points``. The legacy ``get_top_surface_beyond_cloak_indices`` path
         (all downstream surface nodes) is used when ``loss_cfg`` is None or
         ``n_eval_points == 0``.
+
+        Required when ``loss_type == "depth_line"``: the depth and number of
+        eval points are read from ``loss_cfg.depth`` and ``loss_cfg.
+        n_eval_points``. Nodes are selected by nearest-neighbour to the
+        ``(x, y_top - depth)`` positions (no mesh embedding).
 
     Returns
     -------
@@ -315,10 +585,96 @@ def resolve_loss_target(
             params.x_off, params.y_off, params.W, params.H,
         )
         loss_fn = cloaking_loss
+    elif loss_type == "depth_line":
+        if loss_cfg is None:
+            raise ValueError("loss.type='depth_line' requires a LossConfig.")
+        n_eval = int(loss_cfg.n_eval_points)
+        if n_eval <= 0:
+            raise ValueError(
+                "loss.type='depth_line' requires loss.n_eval_points > 0."
+            )
+        eval_xs, y_target = make_fixed_depth_eval_points(
+            geometry, params,
+            depth=float(loss_cfg.depth),
+            n_points=n_eval,
+            noise_sigma=float(loss_cfg.eval_noise_sigma),
+            seed=int(loss_cfg.eval_noise_seed),
+        )
+        indices = find_nearest_node_indices(pts, eval_xs, y_target)
+        loss_fn = cloaking_loss
+    elif loss_type == "surface_depth":
+        if loss_cfg is None:
+            raise ValueError("loss.type='surface_depth' requires a LossConfig.")
+        n_eval = int(loss_cfg.n_eval_points)
+        if n_eval <= 0:
+            raise ValueError(
+                "loss.type='surface_depth' requires loss.n_eval_points > 0."
+            )
+        eval_xs, eval_ys = make_biased_depth_eval_points(
+            geometry, params, n_eval,
+            alpha=float(loss_cfg.alpha),
+            noise_sigma=float(loss_cfg.eval_noise_sigma),
+            seed=int(loss_cfg.eval_noise_seed),
+        )
+        indices = find_nearest_node_indices_xy(pts, eval_xs, eval_ys)
+        loss_fn = transmission_loss
+    elif loss_type == "surface_column":
+        if loss_cfg is None:
+            raise ValueError("loss.type='surface_column' requires a LossConfig.")
+        n_x_eval = int(loss_cfg.n_eval_points)
+        n_y_eval = int(loss_cfg.n_column_samples)
+        if n_x_eval <= 0:
+            raise ValueError(
+                "loss.type='surface_column' requires loss.n_eval_points > 0."
+            )
+        if n_y_eval <= 0:
+            raise ValueError(
+                "loss.type='surface_column' requires loss.n_column_samples > 0."
+            )
+        eval_xs, eval_ys = make_surface_column_eval_points(
+            geometry, params, n_x_eval, n_y_eval,
+            depth=float(loss_cfg.depth),
+            noise_sigma=float(loss_cfg.eval_noise_sigma),
+            seed=int(loss_cfg.eval_noise_seed),
+        )
+        raw_indices = find_nearest_node_indices_xy(pts, eval_xs, eval_ys)
+        indices = np.unique(raw_indices)
+        loss_fn = transmission_loss
+    elif loss_type == "magnitude_band_integral":
+        if loss_cfg is None:
+            raise ValueError(
+                "loss.type='magnitude_band_integral' requires a LossConfig."
+            )
+        depth = float(loss_cfg.depth)
+        if depth < 0.0:
+            raise ValueError(
+                f"loss.type='magnitude_band_integral' requires depth >= 0 "
+                f"(got {depth!r})."
+            )
+        if depth >= float(params.H):
+            raise ValueError(
+                f"depth ({depth!r}) must be < physical height H "
+                f"({params.H!r}) for magnitude_band_integral; deeper bands "
+                f"reach into the bottom PML."
+            )
+        indices = get_magnitude_band_indices(
+            pts, geometry, params.y_top,
+            params.x_off, params.x_off + params.W,
+            depth=depth,
+            mode=str(loss_cfg.band_x_filter),
+        )
+        if len(indices) == 0:
+            raise RuntimeError(
+                f"magnitude_band_integral selected zero nodes (depth="
+                f"{depth!r}, band_x_filter={loss_cfg.band_x_filter!r}). "
+                f"Check geometry and refinement."
+            )
+        loss_fn = transmission_loss
     else:
         raise ValueError(
-            f"Unknown loss type: {loss_type!r}. "
-            f"Choose from 'right_boundary', 'top_surface', 'outside_cloak'."
+            f"Unknown loss type: {loss_type!r}. Choose from "
+            f"'right_boundary', 'top_surface', 'outside_cloak', 'depth_line', "
+            f"'surface_depth', 'surface_column', 'magnitude_band_integral'."
         )
 
     u_ref_at_nodes = jnp.array(u_ref[kept_nodes[indices]])

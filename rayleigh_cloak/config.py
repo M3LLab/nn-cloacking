@@ -188,9 +188,28 @@ class LossConfig(BaseModel):
       beyond the cloak footprint.
     - ``"outside_cloak"``: relative L2 over all physical-domain nodes outside
       the cloak.
+    - ``"depth_line"``: relative L2 on a horizontal line at depth ``depth``
+      below the free surface, restricted to x-positions outside the cloak
+      footprint. ``n_eval_points`` controls the line resolution.
+    - ``"surface_depth"``: same transmission-ratio metric as ``"top_surface"``
+      (``(<|u_cloak|>/<|u_ref|> - 1)^2``), but the ``n_eval_points`` samples keep
+      a surface-like x-spread while being pushed to a depth power-law biased
+      toward the free surface (see ``alpha``). Samples inside the cloak/defect
+      are dropped, so only the field beyond/below the cloak is measured.
+    - ``"surface_column"``: phase-invariant per-node magnitude error on a
+      2-D cloud built from ``n_eval_points`` surface x-positions (same
+      selection as ``"top_surface"``) crossed with ``n_column_samples``
+      y-positions evenly spaced from ``y_top - depth`` up to ``y_top``.
+      Snaps each ``(x, y)`` pair to the nearest mesh node and deduplicates.
+    - ``"magnitude_band_integral"``: mean of ``(|u_cloak|/|u_ref| - 1)^2``
+      over all cloak-mesh nodes in the top band ``[y_top - depth, y_top]``,
+      excluding the cloak/defect footprint. The x-extent is controlled by
+      ``band_x_filter``: ``"downstream"`` (default) restricts to nodes with
+      ``x > x_c``, matching ``"top_surface"`` exactly when ``depth == 0``;
+      ``"full"`` keeps the entire physical x-range.
     """
     model_config = {"extra": "ignore"}
-    type: Literal["right_boundary", "top_surface", "outside_cloak"] = "right_boundary"
+    type: Literal["right_boundary", "top_surface", "outside_cloak", "depth_line", "surface_depth", "surface_column", "magnitude_band_integral"] = "right_boundary"
     multi_freq: MultiFreqConfig = MultiFreqConfig()
     regularizations: RegularizationsConfig = RegularizationsConfig()
     # Mesh-independent surface metric: when ``n_eval_points > 0``, the
@@ -203,6 +222,25 @@ class LossConfig(BaseModel):
                                      # physical units, to break resonance with
                                      # any test wavelength (recommended ~λ*/200).
     eval_noise_seed: int = 0
+    # Depth below the free surface (physical units) at which the
+    # ``"depth_line"`` loss evaluates u. Must be > 0; depth == a places the
+    # line at the triangular defect's apex, depth > b places it strictly
+    # below the cloak.
+    depth: float = 0.0
+    # Power-law exponent for the ``"surface_depth"`` loss depth distribution
+    # (physical_y = y_top - H*(1 - U**(1/alpha)), U ~ U(0,1)). alpha == 1 is
+    # uniform in depth; larger alpha concentrates samples nearer the surface.
+    alpha: float = 4.0
+    # Number of y-positions per surface x-column for the ``"surface_column"``
+    # loss. Y-positions are evenly spaced in [y_top - depth, y_top]; the
+    # total eval-point count before snapping is n_eval_points * n_column_samples.
+    n_column_samples: int = 1
+    # X-extent selector for the ``"magnitude_band_integral"`` loss:
+    # ``"downstream"`` keeps cloak-mesh nodes with x > x_c (matches
+    # ``"top_surface"`` when depth == 0); ``"full"`` keeps the entire
+    # physical x-range [x_off, x_off + W]. Cloak/defect-interior nodes are
+    # always excluded.
+    band_x_filter: Literal["downstream", "full"] = "downstream"
 
 
 class NeuralReparamConfig(BaseModel):

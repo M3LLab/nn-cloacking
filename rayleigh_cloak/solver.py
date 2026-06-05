@@ -193,6 +193,12 @@ def solve_optimization(config: SimulationConfig, step_callback=None) -> Optimiza
     print("=== Step 2: Solving reference problem (on full mesh) ===")
     ref_result = solve_reference(config, mesh=full_mesh)
 
+    from rayleigh_cloak.plot import plot_reference_field
+    plot_reference_field(
+        ref_result,
+        save_path=f"{config.output_dir}/reference_field.png",
+    )
+
     print("=== Step 3: Extracting submesh (removing defect elements) ===")
     cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
     print(f"  Submesh: {len(cloak_mesh.points)} nodes, "
@@ -246,8 +252,8 @@ def solve_optimization(config: SimulationConfig, step_callback=None) -> Optimiza
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
-        from rayleigh_cloak.plot import plot_displacement_field
-        plot_displacement_field(
+        from rayleigh_cloak.plot import plot_step_field
+        plot_step_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
             title=f"|u| — step {step}",
@@ -354,8 +360,8 @@ def solve_optimization_neural(
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
-        from rayleigh_cloak.plot import plot_displacement_field
-        plot_displacement_field(
+        from rayleigh_cloak.plot import plot_step_field
+        plot_step_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
             title=f"|u| — step {step}",
@@ -405,6 +411,13 @@ def solve_optimization_neural(
             # Reference solve at this frequency
             print(f"  f*={f_star:.2f}: solving reference ...", end="", flush=True)
             ref_f = solve_reference(cfg_f, mesh=full_mesh)
+
+            from rayleigh_cloak.plot import plot_reference_field
+            plot_reference_field(
+                ref_f,
+                save_path=f"{config.output_dir}/reference_field_f{f_star:.4f}.png",
+                title=f"Reference field |u| — f*={f_star:.2f}",
+            )
 
             # Build problem at this frequency (sets class attrs, then creates instance)
             problem_f = build_problem(cloak_mesh, cfg_f, dp_f, geometry, cell_decomp)
@@ -473,6 +486,12 @@ def solve_optimization_neural(
     # ── Single-frequency path (original) ───────────────────────────
     print("=== Step 5: Solving reference problem (on full mesh) ===")
     ref_result = solve_reference(config, mesh=full_mesh)
+
+    from rayleigh_cloak.plot import plot_reference_field
+    plot_reference_field(
+        ref_result,
+        save_path=f"{config.output_dir}/reference_field.png",
+    )
 
     problem = build_problem(cloak_mesh, config, params, geometry, cell_decomp)
 
@@ -543,6 +562,12 @@ def solve_optimization_neural_topo(
 
     print("=== Step 2: Solving reference problem (on full mesh) ===")
     ref_result = solve_reference(config, mesh=full_mesh)
+
+    from rayleigh_cloak.plot import plot_reference_field
+    plot_reference_field(
+        ref_result,
+        save_path=f"{config.output_dir}/reference_field.png",
+    )
 
     print("=== Step 3: Extracting submesh (removing defect elements) ===")
     cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
@@ -660,8 +685,8 @@ def solve_optimization_neural_topo(
     step_dir = f"{config.output_dir}/opt_steps"
 
     def _plot_step(step: int, u: np.ndarray) -> None:
-        from rayleigh_cloak.plot import plot_displacement_field
-        plot_displacement_field(
+        from rayleigh_cloak.plot import plot_step_field
+        plot_step_field(
             u, pts_x, pts_y, params,
             save_path=f"{step_dir}/step_{step:04d}.png",
             title=f"|u| — step {step}",
