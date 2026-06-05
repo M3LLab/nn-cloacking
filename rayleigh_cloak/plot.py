@@ -448,6 +448,82 @@ def plot_vtk_results(vtk_path, percentile=95,
     print(f"VTK |Re(u)| plot saved → {fname_re_mag}")
 
 
+def _plot_field_on_phys_domain(
+    values: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str,
+    cbar_label: str,
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+    symmetric: bool = False,
+) -> None:
+    """Render a per-node scalar field on the physical domain.
+
+    Shared by :func:`plot_displacement_field` (magnitude) and the
+    Re(u_y) panel produced by :func:`plot_reference_field`.  Set
+    ``symmetric=True`` for signed fields like Re(u_y) — the half-range
+    is taken from the percentile of ``|values|`` so the colourbar is
+    centred at zero.
+    """
+    import matplotlib.tri as mtri
+
+    x_off, y_off = params.x_off, params.y_off
+    W, H = params.W, params.H
+
+    phys = ((pts_x >= x_off - 1e-8) & (pts_x <= x_off + W + 1e-8) &
+            (pts_y >= y_off - 1e-8))
+
+    px = pts_x[phys] - x_off
+    py = pts_y[phys] - y_off
+    pv = values[phys]
+
+    if symmetric:
+        vlim = np.percentile(np.abs(pv), percentile)
+        norm = _build_norm(norm_type, -vlim, vlim, mid=0.0, symmetric=True)
+    else:
+        vmin_v = np.percentile(pv, 100 - percentile)
+        vmax_v = np.percentile(pv, percentile)
+        norm = _build_norm(norm_type, vmin_v, vmax_v, mid=0.25 * vmax_v)
+
+    if cells is not None:
+        # Re-index the connectivity into the physical-domain submask so the
+        # cut-out cloak void is preserved as a hole.
+        cells = np.asarray(cells)
+        new_index = -np.ones(pts_x.shape[0], dtype=np.int64)
+        new_index[np.where(phys)[0]] = np.arange(int(phys.sum()))
+        cell_keep = phys[cells].all(axis=1)
+        triang = mtri.Triangulation(px, py, new_index[cells[cell_keep]])
+        tri_arg = (triang,)
+    else:
+        tri_arg = (px, py)
+
+    fig, ax = plt.subplots(figsize=(13, 4))
+    tc = ax.tricontourf(*tri_arg, pv, levels=100, cmap='RdBu_r', norm=norm)
+
+    ax.plot(params.x_src - x_off, H, 'r*', markersize=12)
+
+    a, b, c_hw = params.a, params.b, params.c
+    xc = W / 2.0
+    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - b, H],
+            ls='--', color='yellow', lw=1.2)
+    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - a, H],
+            ls='--', color='yellow', lw=1.2)
+
+    fig.colorbar(tc, ax=ax, shrink=0.8, label=cbar_label)
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_aspect('equal')
+
+    os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
 def plot_displacement_field(
     u: np.ndarray,
     pts_x: np.ndarray,
@@ -474,62 +550,102 @@ def plot_displacement_field(
         Delaunay-triangulate the points — required to preserve the
         cut-out cloak void as a hole rather than filling it in.
     """
-    import matplotlib.tri as mtri
-
-    # Phase-invariant magnitude of the complex displacement vector.
     full_mag = np.sqrt(u[:, 0] ** 2 + u[:, 1] ** 2
                        + u[:, 2] ** 2 + u[:, 3] ** 2)
+    _plot_field_on_phys_domain(
+        full_mag, pts_x, pts_y, params,
+        save_path=save_path, title=title, cbar_label='|u|',
+        percentile=percentile, norm_type=norm_type, cells=cells,
+        symmetric=False,
+    )
 
-    x_off, y_off = params.x_off, params.y_off
-    W, H = params.W, params.H
 
-    # Physical-domain mask
-    phys = ((pts_x >= x_off - 1e-8) & (pts_x <= x_off + W + 1e-8) &
-            (pts_y >= y_off - 1e-8))
+def plot_step_field(
+    u: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str = "|u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+) -> None:
+    """Save per-step magnitude and in-phase real-displacement panels.
 
-    px = pts_x[phys] - x_off
-    py = pts_y[phys] - y_off
-    pv = full_mag[phys]
+    Writes the phase-invariant magnitude ``|U|`` to ``save_path`` and
+    the in-phase ``sqrt(Re(u_x)^2 + Re(u_y)^2)`` snapshot to
+    ``<stem>_re_mag<ext>``.  The real-magnitude panel exposes the
+    propagating wave that the envelope hides.
+    """
+    plot_displacement_field(
+        u, pts_x, pts_y, params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
+    re_mag = np.sqrt(u[:, 0] ** 2 + u[:, 1] ** 2)
+    root, ext = os.path.splitext(save_path)
+    _plot_field_on_phys_domain(
+        re_mag, pts_x, pts_y, params,
+        save_path=f"{root}_re_mag{ext}",
+        title=title.replace("|u|", "|Re(u)|"),
+        cbar_label="|Re(u)|",
+        percentile=percentile, norm_type=norm_type, cells=cells,
+        symmetric=False,
+    )
 
-    vmin_v = np.percentile(pv, 100 - percentile)
-    vmax_v = np.percentile(pv, percentile)
-    norm = _build_norm(norm_type, vmin_v, vmax_v, mid=0.25 * vmax_v)
 
-    if cells is not None:
-        # Re-index the connectivity into the physical-domain submask so the
-        # cut-out cloak void is preserved as a hole.
-        cells = np.asarray(cells)
-        new_index = -np.ones(pts_x.shape[0], dtype=np.int64)
-        new_index[np.where(phys)[0]] = np.arange(int(phys.sum()))
-        cell_keep = phys[cells].all(axis=1)
-        triang = mtri.Triangulation(px, py, new_index[cells[cell_keep]])
-        tri_arg = (triang,)
-    else:
-        tri_arg = (px, py)
+def plot_reference_field(
+    ref_result: SolutionResult,
+    save_path: str,
+    title: str = "Reference field |u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+) -> None:
+    """Save four diagnostic panels for a reference (uncloaked) solve.
 
-    fig, ax = plt.subplots(figsize=(13, 4))
-    tc = ax.tricontourf(*tri_arg, pv, levels=100, cmap='RdBu_r', norm=norm)
+    Files written next to ``save_path`` (suffix on the filename stem):
 
-    # Source marker
-    ax.plot(params.x_src - x_off, H, 'r*', markersize=12)
+      * ``''``         — |U| phase-invariant magnitude (envelope only)
+      * ``'_re_ux'``   — Re(u_x), wavelength-visible component
+      * ``'_re_uy'``   — Re(u_y), wavelength-visible component
+      * ``'_re_mag'``  — ``sqrt(Re(u_x)^2 + Re(u_y)^2)``, the
+        in-phase real-displacement snapshot
 
-    # Cloak outline (physical coords)
-    a, b, c_hw = params.a, params.b, params.c
-    xc = W / 2.0
-    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - b, H],
-            ls='--', color='yellow', lw=1.2)
-    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - a, H],
-            ls='--', color='yellow', lw=1.2)
+    The Re(u) panels expose the propagating wave that the envelope
+    plot hides.
+    """
+    pts = np.asarray(ref_result.mesh.points)
+    cells = np.asarray(ref_result.mesh.cells)
+    pts_x = pts[:, 0]
+    pts_y = pts[:, 1]
+    params = ref_result.params
 
-    fig.colorbar(tc, ax=ax, shrink=0.8, label='|u|')
-    ax.set_title(title)
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_aspect('equal')
+    plot_displacement_field(
+        ref_result.u, pts_x, pts_y, params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
 
-    os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    root, ext = os.path.splitext(save_path)
+    re_ux = ref_result.u[:, 0]
+    re_uy = ref_result.u[:, 1]
+    re_mag = np.sqrt(re_ux ** 2 + re_uy ** 2)
+
+    panels = (
+        ("_re_ux",  re_ux,  "Re(u_x)", True),
+        ("_re_uy",  re_uy,  "Re(u_y)", True),
+        ("_re_mag", re_mag, "|Re(u)|", False),
+    )
+    for suffix, vals, label, sym in panels:
+        _plot_field_on_phys_domain(
+            vals, pts_x, pts_y, params,
+            save_path=f"{root}{suffix}{ext}",
+            title=title.replace("|u|", label),
+            cbar_label=label,
+            percentile=percentile, norm_type=norm_type, cells=cells,
+            symmetric=sym,
+        )
 
 
 def plot_results(result: SolutionResult, percentile: float = 95,
