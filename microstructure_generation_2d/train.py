@@ -71,6 +71,9 @@ def main() -> None:
         save_every_epoch=cfg.get("save_every_epoch", 5),
         num_workers=cfg.get("num_workers", None),
         compressed=cfg.get("compressed", False),
+        num_res_blocks=cfg.get("num_res_blocks", 1),
+        parameterization=cfg.get("parameterization", "x0"),
+        min_snr_gamma=cfg.get("min_snr_gamma", 0.0),
     )
     model = DiffusionModel(**model_kwargs)
 

@@ -48,6 +48,7 @@ class UNetModel(nn.Module):
         verbose: bool = False,
         tensor_condition_dim: int = 5,
         use_tensor_condition: bool = True,
+        num_res_blocks: int = 1,
     ):
         super().__init__()
         self.world_dims = world_dims
@@ -107,7 +108,11 @@ class UNetModel(nn.Module):
                     use_tensor_condition=use_tensor_condition,
                     tensor_condition_dim=tensor_condition_dim,
                 ),
-                our_Identity(),  # placeholder (3D code had a disabled cross attn here)
+                ResnetBlock(
+                    world_dims, dim_out, dim_out, emb_dim=emb_dim, dropout=dropout,
+                    use_tensor_condition=use_tensor_condition,
+                    tensor_condition_dim=tensor_condition_dim,
+                ) if num_res_blocks >= 2 else our_Identity(),
                 our_Identity(),  # placeholder (vol cross attn; disabled in 3D)
                 nn.Sequential(
                     normalization(dim_out),
@@ -159,7 +164,11 @@ class UNetModel(nn.Module):
                     use_tensor_condition=use_tensor_condition,
                     tensor_condition_dim=tensor_condition_dim,
                 ),
-                our_Identity(),
+                ResnetBlock(
+                    world_dims, dim_in, dim_in, emb_dim=emb_dim, dropout=dropout,
+                    use_tensor_condition=use_tensor_condition,
+                    tensor_condition_dim=tensor_condition_dim,
+                ) if num_res_blocks >= 2 else our_Identity(),
                 our_Identity(),
                 nn.Sequential(
                     normalization(dim_in),
@@ -196,8 +205,9 @@ class UNetModel(nn.Module):
             vol_condition = tensor_emb[:, :, -1:].permute(0, 2, 1)
 
         h = []
-        for resnet, _ca, _ca2, self_attn, downsample in self.downs:
+        for resnet, resnet2, _ca2, self_attn, downsample in self.downs:
             x = resnet(x, t_emb, tensor_emb)
+            x = resnet2(x, t_emb, tensor_emb)
             x = self_attn(x)
             h.append(x)
             x = downsample(x)
@@ -208,9 +218,10 @@ class UNetModel(nn.Module):
         x = self.mid_self_attn(x)
         x = self.mid_block2(x, t_emb, tensor_emb)
 
-        for resnet, _ca, _ca2, self_attn, upsample in self.ups:
+        for resnet, resnet2, _ca2, self_attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
             x = resnet(x, t_emb, tensor_emb)
+            x = resnet2(x, t_emb, tensor_emb)
             x = self_attn(x)
             x = upsample(x)
 

@@ -53,6 +53,24 @@ def _petsc_opts(cfg: SimulationConfig3D) -> dict:
     return {"petsc_solver": opts}
 
 
+def _solver_opts_pair(cfg: SimulationConfig3D) -> tuple[dict, dict]:
+    """Return (forward_opts, adjoint_opts) dicts for the configured backend.
+
+    For the cuDSS backend the adjoint options carry ``_is_adjoint=True`` so
+    the custom solver knows to apply the J-trick (sign-flip of imaginary
+    DOFs on both sides of the solve) and reuse the forward factorisation
+    — key to fitting a full AD step into the 2 min/iter budget.
+    """
+    if cfg.solver.backend == "cudss":
+        from rayleigh_cloak_3d.cudss_solver import make_forward_and_adjoint
+        return make_forward_and_adjoint({
+            "hybrid_memory": cfg.solver.cudss_hybrid_memory,
+            "verbose": cfg.solver.cudss_verbose,
+        })
+    opts = _petsc_opts(cfg)
+    return opts, opts
+
+
 def solve(cfg: SimulationConfig3D, mesh: Mesh | None = None) -> SolutionResult3D:
     """Run a forward simulation (reference or with continuous push-forward cloak)."""
     params = DerivedParams3D.from_config(cfg)
@@ -64,7 +82,8 @@ def solve(cfg: SimulationConfig3D, mesh: Mesh | None = None) -> SolutionResult3D
     problem = build_problem(mesh, cfg, params, geometry)
 
     print("Solving 3D frequency-domain system ...")
-    sol_list = jax_fem_solver(problem, solver_options=_petsc_opts(cfg))
+    fwd_opts, _ = _solver_opts_pair(cfg)
+    sol_list = jax_fem_solver(problem, solver_options=fwd_opts)
     return SolutionResult3D(
         u=np.asarray(sol_list[0]),
         mesh=mesh,
@@ -175,8 +194,8 @@ def solve_optimization_neural(
     print(f"  {len(target_idx)} target nodes ({cfg.loss.type})")
 
     print("=== Step 6: Optimising MLP weights ===")
-    solver_opts = _petsc_opts(cfg)
-    fwd_solve = ad_wrapper(problem, solver_opts, solver_opts)
+    fwd_opts, adj_opts = _solver_opts_pair(cfg)
+    fwd_solve = ad_wrapper(problem, fwd_opts, adj_opts)
 
     # Wrap so the optimiser's forward takes theta directly.
     def fwd_pred(theta):

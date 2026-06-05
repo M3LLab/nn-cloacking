@@ -37,7 +37,7 @@ import torch
 from tqdm import tqdm
 
 from dataset.cellular_chiral.diffusion_dataset import (
-    CELL_SIZE, PAD_TO, load_or_make_split, unfold_mirror,
+    CELL_SIZE, PAD_TO, QUADRANT_SIZE, load_or_make_split, unfold_mirror,
 )
 from .network.model_trainer import DiffusionModel
 
@@ -53,7 +53,7 @@ def _crop_64_to_50(arr: np.ndarray) -> np.ndarray:
 
 def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
     if compressed:
-        return unfold_mirror(arr).astype(np.uint8)
+        return unfold_mirror(arr[..., :QUADRANT_SIZE, :QUADRANT_SIZE]).astype(np.uint8)
     return _crop_64_to_50(arr)
 
 

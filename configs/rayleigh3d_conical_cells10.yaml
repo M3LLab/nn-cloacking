@@ -23,9 +23,9 @@ absorbing:
 
 mesh:
   n_pml: 8
-  n_phys: 40
-  refinement_factor: 3
-  ele_type: TET10
+  n_phys: 18
+  refinement_factor: 2
+  ele_type: TET4
 
 source:
   source_type: gaussian_point
@@ -35,9 +35,7 @@ source:
   F0: 1.0
 
 solver:
-  ksp_type: preonly
-  pc_type: lu
-  pc_factor_mat_solver_type: mumps
+  backend: cudss
 
 cells:
   mode: grid
@@ -49,15 +47,15 @@ cells:
 
 optimization:
   method: neural
-  n_iters: 50
+  n_iters: 1000
   lr: 0.01
   lr_end: 0.0001
-  lr_schedule: linear
+  lr_schedule: cosine
   lambda_l2: 0.0
   plot_every: 1
   neural:
     hidden_size: 256
-    n_layers: 4
+    n_layers: 6
     n_fourier: 32
     seed: 42
     output_scale: 0.1

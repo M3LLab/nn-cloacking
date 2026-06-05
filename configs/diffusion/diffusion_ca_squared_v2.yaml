@@ -13,7 +13,7 @@ split_seed: 777
 results_folder: output/diffusion_ca_squared
 name: v2
 seed: 777
-save_every_epoch: 5
+save_every_epoch: 50
 save_last: true
 continue_training: false
 
@@ -28,12 +28,12 @@ use_tensor_condition: true
 noise_schedule: cosine
 
 # training
-batch_size: 64
+batch_size: 512
 lr: 1.0e-4
 lr_schedule: cosine
 optimizer_name: adam
 ema_rate: 0.9999
-training_epoch: 200
+training_epoch: 500
 gradient_clip_val: 1.0
 num_workers: 4
 precision: "32-true"

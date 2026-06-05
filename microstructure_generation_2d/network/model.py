@@ -38,6 +38,7 @@ TENSOR_DIM = 5  # (C11, C22, C12, C66, vol)
 _CELL_SIZE = 50
 _PAD_TO = 64
 _OFF = (_PAD_TO - _CELL_SIZE) // 2  # 7-pixel void border for legacy 64x64 mode
+_QUADRANT_SIZE = 25  # compressed-mode active content; loss cropped here when padded
 
 
 def _parse_attention_sizes(spec) -> tuple[int, ...]:
@@ -70,10 +71,15 @@ class OccupancyDiffusion(nn.Module):
         eps: float = 1e-6,
         noise_schedule: str = "linear",
         compressed: bool = False,
+        num_res_blocks: int = 1,
+        parameterization: str = "x0",
+        min_snr_gamma: float = 0.0,
     ):
         super().__init__()
         self.image_size = image_size
         self.compressed = compressed
+        self.parameterization = parameterization
+        self.min_snr_gamma = min_snr_gamma
 
         if dim_mults is None:
             if image_size == 64:
@@ -118,6 +124,7 @@ class OccupancyDiffusion(nn.Module):
             with_attention=with_attention,
             verbose=verbose,
             tensor_condition_dim=TENSOR_DIM,
+            num_res_blocks=num_res_blocks,
         )
 
     @property
@@ -139,16 +146,46 @@ class OccupancyDiffusion(nn.Module):
         alpha, sigma = log_snr_to_alpha_sigma(padded_noise_level)
         noised_img = alpha * img + sigma * noise
 
+        # v-parameterization: target is v = α·ε − σ·x₀
+        if self.parameterization == "v":
+            target = alpha * noise - sigma * img
+        else:
+            target = img
+
         self_cond = None
         if random() < 0.5:
             with torch.no_grad():
-                self_cond = self.denoise_fn(noised_img, noise_level, tensor_feature).detach_()
+                pred_first = self.denoise_fn(noised_img, noise_level, tensor_feature).detach_()
+                if self.parameterization == "v":
+                    # convert v→x₀ for self-conditioning channel
+                    self_cond = (alpha * noised_img - sigma * pred_first).detach_()
+                else:
+                    self_cond = pred_first
+
         pred = self.denoise_fn(noised_img, noise_level, tensor_feature, self_cond)
+
+        # Crop to active region
         if self.compressed:
-            # Compressed mode: image is the 25x25 quadrant, no void border to mask.
-            return F.mse_loss(pred, img)
-        return F.mse_loss(pred[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE],
-                          img[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE])
+            pred   = pred[...,   :_QUADRANT_SIZE, :_QUADRANT_SIZE]
+            target = target[..., :_QUADRANT_SIZE, :_QUADRANT_SIZE]
+        else:
+            pred   = pred[...,   _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE]
+            target = target[..., _OFF:_OFF+_CELL_SIZE, _OFF:_OFF+_CELL_SIZE]
+
+        mse = F.mse_loss(pred, target, reduction="none")
+
+        if self.min_snr_gamma > 0.0:
+            snr = torch.exp(noise_level)                                      # (B,)
+            gamma = self.min_snr_gamma
+            if self.parameterization == "v":
+                # weight from the min-SNR paper for v-prediction
+                weight = torch.minimum(snr, snr.new_full((), gamma)) / (snr + 1.0)
+            else:
+                weight = torch.minimum(snr, snr.new_full((), gamma))
+            weight = weight.view(-1, *([1] * (mse.dim() - 1)))
+            return (weight * mse).mean()
+
+        return mse.mean()
 
     def denoise_step(self, img, x_start, time, time_next, tensor_cond, tensor_zero, tensor_w):
         """One DDIM-style update; returns ``(img_next, x_start)``.
@@ -219,9 +256,17 @@ class OccupancyDiffusion(nn.Module):
             alpha_next, sigma_next = log_snr_to_alpha_sigma(log_snr_next)
             noise_cond = self.log_snr(time)
 
-            x_zero = self.denoise_fn(img, noise_cond, tensor_zero, x_start)
+            pred_zero = self.denoise_fn(img, noise_cond, tensor_zero, x_start)
+            if self.parameterization == "v":
+                x_zero = alpha * img - sigma * pred_zero
+            else:
+                x_zero = pred_zero
             if tensor_cond is not None and tensor_w != 0.0:
-                x_with = self.denoise_fn(img, noise_cond, tensor_cond, x_start)
+                pred_with = self.denoise_fn(img, noise_cond, tensor_cond, x_start)
+                if self.parameterization == "v":
+                    x_with = alpha * img - sigma * pred_with
+                else:
+                    x_with = pred_with
                 x_start = x_zero + tensor_w * (x_with - x_zero)
             else:
                 x_start = x_zero

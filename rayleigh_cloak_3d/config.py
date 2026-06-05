@@ -58,9 +58,14 @@ class SourceConfig(BaseModel):
 
 
 class SolverConfig(BaseModel):
+    backend: Literal["petsc", "cudss"] = "petsc"
+    # PETSc options (used when backend == 'petsc').
     ksp_type: str = "preonly"
     pc_type: str = "lu"
     pc_factor_mat_solver_type: str = ""   # e.g. "mumps" for large 3D
+    # cuDSS options (used when backend == 'cudss').
+    cudss_hybrid_memory: bool = False
+    cudss_verbose: bool = True
 
 
 class CellConfig(BaseModel):

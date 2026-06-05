@@ -107,6 +107,7 @@ class CABulkDiffusionDataset(Dataset):
         cfg_dropout: bool = True,
         seed: Optional[int] = None,
         compressed: bool = False,
+        padded_size: int = QUADRANT_SIZE,
     ):
         super().__init__()
         self.h5_path = str(h5_path)
@@ -114,6 +115,7 @@ class CABulkDiffusionDataset(Dataset):
         self.indices = np.asarray(indices, dtype=np.int64)
         self.cfg_dropout = cfg_dropout
         self.compressed = compressed
+        self.padded_size = padded_size
         self._h5: Optional[h5py.File] = None
         self._cells = None  # type: ignore
         self._C11 = None
@@ -147,7 +149,11 @@ class CABulkDiffusionDataset(Dataset):
         cell_u8 = np.asarray(self._cells[h_idx], dtype=np.uint8)  # (50, 50)
         cell_pm1 = (cell_u8.astype(np.float32) * 2.0 - 1.0)
         if self.compressed:
-            occ = cell_pm1[:QUADRANT_SIZE, :QUADRANT_SIZE][None, :, :]  # (1, 25, 25)
+            q = cell_pm1[:QUADRANT_SIZE, :QUADRANT_SIZE]  # (25, 25)
+            if self.padded_size > QUADRANT_SIZE:
+                pad = self.padded_size - QUADRANT_SIZE
+                q = np.pad(q, ((0, pad), (0, pad)), constant_values=-1.0)
+            occ = q[None, :, :]  # (1, padded_size, padded_size)
         else:
             occ = _pad_to_64(cell_pm1)[None, :, :]  # (1, 64, 64)
 

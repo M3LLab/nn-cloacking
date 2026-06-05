@@ -49,7 +49,7 @@ import torch
 from tqdm import tqdm
 
 from dataset.cellular_chiral.diffusion_dataset import (
-    CELL_SIZE, PAD_TO, load_or_make_split, unfold_mirror,
+    CELL_SIZE, PAD_TO, QUADRANT_SIZE, load_or_make_split, unfold_mirror,
 )
 from .network.model_trainer import DiffusionModel
 
@@ -77,7 +77,7 @@ def _crop(arr: np.ndarray) -> np.ndarray:
 
 def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
     if compressed:
-        return unfold_mirror(arr).astype(np.uint8)
+        return unfold_mirror(arr[..., :QUADRANT_SIZE, :QUADRANT_SIZE]).astype(np.uint8)
     return _crop(arr)
 
 
@@ -229,8 +229,11 @@ def main() -> None:
                              "checkpoint hparam).")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-samples", type=int, default=None,
-                        help="Cap number of val samples (for smoke testing)")
+    parser.add_argument("--val-limit", type=int, default=None,
+                        help="Randomly subsample this many val points (reproducible via --seed).")
+    parser.add_argument("--diffusion-samples", type=int, default=1,
+                        help="Number of diffusion samples to generate per val point; "
+                             "the one whose FEM stiffness is closest to the target is kept.")
     args = parser.parse_args()
 
     out_dir   = Path(args.output_dir)
@@ -255,8 +258,10 @@ def main() -> None:
     )
     val_indices   = split["val"]
     train_indices = split["train"]
-    if args.max_samples is not None:
-        val_indices = val_indices[: args.max_samples]
+    if args.val_limit is not None:
+        rng = np.random.default_rng(args.seed)
+        val_indices = rng.choice(val_indices, size=min(args.val_limit, len(val_indices)), replace=False)
+        val_indices = np.sort(val_indices)  # keep h5 access sequential
 
     print(f"Val samples : {len(val_indices)}")
     print(f"Train samples: {len(train_indices)}")
@@ -314,30 +319,44 @@ def main() -> None:
                 vol,
             ], dtype=np.float32)
 
-            # -- generate --
-            with torch.no_grad():
-                img = generator.sample_with_tensor(
-                    tensor_c=tf,
-                    batch_size=1,
-                    steps=args.steps,
-                    tensor_w=args.tensor_w,
-                    verbose=False,
-                )
-            arr      = img.cpu().numpy().squeeze()  # (H, H) with H in {64, 25}
-            gen_cell = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
-
-            # -- FEM on generated --
-            c11_gen, c22_gen, c12_gen, c66_gen, vol_gen = _run_fem(gen_cell)
-
-            # -- nearest neighbour --
-            query = np.array([
+            # -- generate (best of args.diffusion_samples) --
+            scaled_target = np.array([
                 float(sc11.transform([[c11]])[0, 0]),
                 float(sc22.transform([[c22]])[0, 0]),
                 float(sc12.transform([[c12]])[0, 0]),
                 float(sc66.transform([[c66]])[0, 0]),
                 (vol - VOL_MEAN) / VOL_STD,
             ], dtype=np.float32)
-            nn_pos     = _find_nn(query, train_feats)
+
+            best_cell, best_fem, best_dist = None, None, np.inf
+            for _ in range(args.diffusion_samples):
+                with torch.no_grad():
+                    img = generator.sample_with_tensor(
+                        tensor_c=tf,
+                        batch_size=1,
+                        steps=args.steps,
+                        tensor_w=args.tensor_w,
+                        verbose=False,
+                    )
+                arr       = img.cpu().numpy().squeeze()
+                candidate = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
+                fem = _run_fem(candidate)  # (c11, c22, c12, c66, vol)
+                cand_scaled = np.array([
+                    float(sc11.transform([[fem[0]]])[0, 0]),
+                    float(sc22.transform([[fem[1]]])[0, 0]),
+                    float(sc12.transform([[fem[2]]])[0, 0]),
+                    float(sc66.transform([[fem[3]]])[0, 0]),
+                    (fem[4] - VOL_MEAN) / VOL_STD,
+                ], dtype=np.float32)
+                dist = float(np.sum((cand_scaled - scaled_target) ** 2))
+                if dist < best_dist:
+                    best_dist, best_cell, best_fem = dist, candidate, fem
+
+            gen_cell = best_cell
+            c11_gen, c22_gen, c12_gen, c66_gen, vol_gen = best_fem
+
+            # -- nearest neighbour --
+            nn_pos     = _find_nn(scaled_target, train_feats)
             nn_h5_idx  = int(train_indices_arr[nn_pos])
             nn_cell    = _load_cell(h5, nn_h5_idx)
             c11_nn = float(tr_C11[nn_pos])

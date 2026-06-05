@@ -52,6 +52,9 @@ class DiffusionModel(LightningModule):
         compressed: bool = False,
         dim_mults=None,
         attention_sizes=None,
+        num_res_blocks: int = 1,
+        parameterization: str = "x0",
+        min_snr_gamma: float = 0.0,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -72,6 +75,9 @@ class DiffusionModel(LightningModule):
             noise_schedule=noise_schedule,
             verbose=verbose,
             compressed=compressed,
+            num_res_blocks=num_res_blocks,
+            parameterization=parameterization,
+            min_snr_gamma=min_snr_gamma,
         )
 
         self.batch_size = batch_size
@@ -135,6 +141,7 @@ class DiffusionModel(LightningModule):
             indices=indices,
             cfg_dropout=cfg_dropout,
             compressed=self.compressed,
+            padded_size=self.hparams.image_size if self.compressed else 0,
         )
         return DataLoader(
             ds, batch_size=self.batch_size, shuffle=shuffle,
