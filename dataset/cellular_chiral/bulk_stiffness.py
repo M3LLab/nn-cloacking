@@ -49,6 +49,8 @@ import sys
 import time
 from pathlib import Path
 
+import functools
+
 import h5py
 import numpy as np
 from tqdm import tqdm
@@ -77,6 +79,14 @@ logging.getLogger("jax_fem").setLevel(logging.ERROR)
 # Stiffness from in-memory array
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=4)
+def _get_mesh(N: int):
+    points, cells = make_structured_tri_mesh(N)
+    mesh = Mesh(points, cells, ele_type="TRI3")
+    P_mat = build_periodic_pmat(N, vec=2)
+    return points, cells, mesh, P_mat
+
+
 _LOAD_CASES = [
     np.array([[1.0, 0.0], [0.0, 0.0]]),  # e11
     np.array([[0.0, 0.0], [0.0, 1.0]]),  # e22
@@ -103,10 +113,8 @@ def _compute_stiffness(
     assert pixel_image.shape == (N, N), f"expected square image, got {pixel_image.shape}"
     vf = float(pixel_image.astype(np.float64).mean())
 
-    points, cells = make_structured_tri_mesh(N)
-    mesh = Mesh(points, cells, ele_type="TRI3")
+    points, cells, mesh, P_mat = _get_mesh(N)
     E_field = assign_material(pixel_image, points, cells, num_quads=1)
-    P_mat = build_periodic_pmat(N, vec=2)
 
     def corner(point):
         return jnp.isclose(point[0], 0.0, atol=1e-5) & jnp.isclose(point[1], 0.0, atol=1e-5)

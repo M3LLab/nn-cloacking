@@ -14,7 +14,7 @@ from typing import Literal
 
 import numpy as np
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 # ── user-facing config sections ──────────────────────────────────────
@@ -118,6 +118,15 @@ class CellConfig(BaseModel):
     # `python -m dataset.cellular_chiral.fit_gmm` (its `feature_mean` field is
     # the centroid).
     init_path: str | None = None
+
+    @model_validator(mode="after")
+    def _check_pushforward_only_fields(self) -> "CellConfig":
+        if self.symmetrize_init and self.init != "pushforward":
+            raise ValueError(
+                f"symmetrize_init=True has no effect when init='{self.init}'; "
+                "it only applies to the 'pushforward' initialisation."
+            )
+        return self
 
 
 class MultiFreqConfig(BaseModel):
