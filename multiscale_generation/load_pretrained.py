@@ -1,15 +1,20 @@
 
+from pathlib import Path
+
 import joblib
 
 from rayleigh_cloak.neural_reparam import load_theta, make_neural_reparam
 
 
 def load_scalers(scaler_dir):
-    scaler_C11 = joblib.load(scaler_dir / "scaler_C11")
-    scaler_C12 = joblib.load(scaler_dir / "scaler_C12")
-    scaler_C66 = joblib.load(scaler_dir / "scaler_C66")
-
-    return scaler_C11, scaler_C12, scaler_C66
+    """Load the four fitted ``StandardScaler``s in the diffusion conditioning
+    order ``(C11, C22, C12, C66)`` (see ``microstructure_generation_2d`` /
+    ``diffusion_dataset``). Returns them in that order."""
+    scaler_dir = Path(scaler_dir)
+    return tuple(
+        joblib.load(scaler_dir / f"scaler_{name}")
+        for name in ("C11", "C22", "C12", "C66")
+    )
 
 
 def load_neural_field(nf_config, cell_decomp, params_init):

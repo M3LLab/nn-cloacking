@@ -4,6 +4,7 @@ import numpy as np
 from dataset.cellular_chiral.diffusion_dataset import CELL_SIZE, PAD_TO, unfold_mirror
 from microstructure_generation_2d.eval_nn_comparison import _decode_to_50
 from microstructure_generation_2d.network.model_trainer import DiffusionModel
+from rayleigh_cloak.materials import _get_converters
 from .fem import (
     build_cloak_layout,
     build_pixel_objective,
@@ -13,6 +14,28 @@ from .fem import (
 from .load_pretrained import load_scalers, load_neural_field
 
 _OFF = (PAD_TO - CELL_SIZE) // 2  # 7-pixel void border for legacy 64x64 mode
+
+
+def moduli_in_diffusion_order(C, xp=np):
+    """Read ``(C11, C22, C12, C66)`` from a full ``(..., 2, 2, 2, 2)`` stiffness
+    tensor in the exact order the 2D diffusion was conditioned on.
+
+    Mirrors ``dataset.cellular_chiral.bulk_stiffness._ortho_params_from_C`` (which
+    reads the augmented-Voigt matrix): ``C11 = C[0,0,0,0]``, ``C22 = C[1,1,1,1]``,
+    ``C12 = C[0,0,1,1]`` (lateral coupling, Voigt ``[0,1]``), ``C66 = C[0,1,0,1]``
+    (engineering shear, Voigt ``[2,2]``). Going through the full tensor makes this
+    independent of the neural field's flat layout (``n_C_params``); e.g. the flat4
+    ``C_to_flatC`` order is ``[C11, C22, C66, C12]``, which this reorders correctly.
+
+    ``xp`` is the array module — ``numpy`` for the eval path, ``jax.numpy`` inside
+    the autodiff bridge.
+    """
+    return xp.stack([
+        C[..., 0, 0, 0, 0],  # C11
+        C[..., 1, 1, 1, 1],  # C22
+        C[..., 0, 0, 1, 1],  # C12
+        C[..., 0, 1, 0, 1],  # C66
+    ], axis=-1)
 
 
 def tile_image_torch(geoms: torch.Tensor, n_x: int, n_y: int) -> torch.Tensor:
@@ -41,14 +64,29 @@ class MultiscaleDiffusionModel:
         self.nf_config = neural_field_config
         self.device = device
 
-        self.scaler_C11, self.scaler_C12, self.scaler_C66 = load_scalers(self.diffusion_config.scaler_dir)
-        diffusion = DiffusionModel.load_from_checkpoint(self.diffusion_config.ckpt, map_location=device).to(device)
+        # Diffusion condition scalers, in the model's order (C11, C22, C12, C66).
+        (self.scaler_C11, self.scaler_C22,
+         self.scaler_C12, self.scaler_C66) = load_scalers(self.diffusion_config.scaler_dir)
+
+        diffusion = DiffusionModel.load_from_checkpoint(str(self.diffusion_config.ckpt), map_location=device).to(device)
         diffusion.eval()
         self.generator = diffusion.ema_model
         self.generator.eval()
 
+    @property
+    def compressed(self) -> bool:
+        """Decode mode: explicit ``diffusion_config.compressed`` wins; if it is
+        ``None`` (or absent), trust the checkpoint's own layout flag (a 25x25
+        quadrant generator => compressed)."""
+        cfg = getattr(self.diffusion_config, "compressed", None)
+        if cfg is not None:
+            return bool(cfg)
+        return bool(getattr(self.generator, "compressed", False))
 
-        self.scaler_C11, self.scaler_C12, self.scaler_C66 = load_scalers(self.diffusion_config.scaler_dir)
+    @classmethod
+    def from_config(cls, device, config):
+        """Build from a :class:`multiscale_generation.config.MultiscaleConfig`."""
+        return cls(device, config.diffusion, config.cell_decomposition, config.neural_field)
 
     def predict_with_neural_field(self):
         # Older single-cell numpy path (pre-bridge); not wired. The trajectory-
@@ -63,15 +101,8 @@ class MultiscaleDiffusionModel:
         reparam, theta = load_neural_field(
             self.nf_config, self._cloak_layout().decomp, self._neural_field_init_params()
         )
-        c11, c12, c66, vol = ...  # TODO: extract a single condition from reparam.decode(theta)
-
-        tf = np.array([
-            float(self.scaler_C11.transform([[c11]])[0, 0]),
-            float(self.scaler_C12.transform([[c12]])[0, 0]),
-            float(self.scaler_C66.transform([[c66]])[0, 0]),
-            vol,
-        ], dtype=np.float32)
-
+        cell_C, cell_rho = reparam.decode(theta)  # (n_cells, n_C), (n_cells,)
+        tf = self._cell_condition(cell_C[0], cell_rho[0])  # (5,) for one cell
 
         img = self.generator.sample_with_tensor(
             tensor_c=tf,
@@ -81,7 +112,7 @@ class MultiscaleDiffusionModel:
             verbose=False,
         )
         arr = img.detach().cpu().numpy().squeeze()  # (H, H) with H in {64, 25}
-        gen_cell = _decode_to_50((arr > 0).astype(np.uint8), compressed=self.diffusion_config.compressed)
+        gen_cell = _decode_to_50((arr > 0).astype(np.uint8), compressed=self.compressed)
 
         return gen_cell
     
@@ -93,13 +124,12 @@ class MultiscaleDiffusionModel:
         `.transform` returns numpy and would detach the neural field).
         """
         if not hasattr(self, "_cond_mean"):
+            scalers = (self.scaler_C11, self.scaler_C22, self.scaler_C12, self.scaler_C66)
             self._cond_mean = torch.tensor(
-                [self.scaler_C11.mean_[0], self.scaler_C12.mean_[0], self.scaler_C66.mean_[0]],
-                dtype=torch.float32, device=self.device,
+                [s.mean_[0] for s in scalers], dtype=torch.float32, device=self.device,
             )
             self._cond_scale = torch.tensor(
-                [self.scaler_C11.scale_[0], self.scaler_C12.scale_[0], self.scaler_C66.scale_[0]],
-                dtype=torch.float32, device=self.device,
+                [s.scale_[0] for s in scalers], dtype=torch.float32, device=self.device,
             )
         return self._cond_mean, self._cond_scale
 
@@ -112,14 +142,9 @@ class MultiscaleDiffusionModel:
         """
         if not hasattr(self, "_cond_mean_jnp"):
             import jax.numpy as jnp
-            self._cond_mean_jnp = jnp.asarray(
-                [self.scaler_C11.mean_[0], self.scaler_C12.mean_[0], self.scaler_C66.mean_[0]],
-                dtype=jnp.float32,
-            )
-            self._cond_scale_jnp = jnp.asarray(
-                [self.scaler_C11.scale_[0], self.scaler_C12.scale_[0], self.scaler_C66.scale_[0]],
-                dtype=jnp.float32,
-            )
+            scalers = (self.scaler_C11, self.scaler_C22, self.scaler_C12, self.scaler_C66)
+            self._cond_mean_jnp = jnp.asarray([s.mean_[0] for s in scalers], dtype=jnp.float32)
+            self._cond_scale_jnp = jnp.asarray([s.scale_[0] for s in scalers], dtype=jnp.float32)
         return self._cond_mean_jnp, self._cond_scale_jnp
 
     def _jnp_to_torch(self, arr, dtype=torch.float32, requires_grad=False):
@@ -139,16 +164,17 @@ class MultiscaleDiffusionModel:
         import jax.numpy as jnp
         return jnp.asarray(t.detach().cpu().numpy())
 
-    def _to_condition_torch(self, c11, c12, c66, vol):
+    def _to_condition_torch(self, c11, c22, c12, c66, vol):
         """Differentiable version of the scaled diffusion condition.
 
-        c11/c12/c66/vol are 0-d torch tensors from the neural field (with grad).
-        vol is passed through unscaled, matching the numpy `predict_with_neural_field`
-        path. Returns a (TENSOR_DIM,) tensor whose graph reaches the field params.
+        c11/c22/c12/c66/vol are 0-d torch tensors from the neural field (with
+        grad), already in the diffusion order. The four moduli are z-scored with
+        the fitted scalers; vol is passed through unscaled. Returns a
+        ``(TENSOR_DIM,)`` = ``(5,)`` tensor whose graph reaches the field params.
         """
         mean, scale = self._scaler_params()
-        moduli = (torch.stack([c11, c12, c66]) - mean) / scale  # (3,)
-        return torch.cat([moduli, vol.reshape(1)])              # (4,)
+        moduli = (torch.stack([c11, c22, c12, c66]) - mean) / scale  # (4,)
+        return torch.cat([moduli, vol.reshape(1)])                   # (5,)
 
     def _rayleigh_config(self):
         """Load + cache the rayleigh ``SimulationConfig`` describing the cloak."""
@@ -165,24 +191,37 @@ class MultiscaleDiffusionModel:
         return self._layout
 
     def _cell_condition(self, cell_C_flat, cell_rho):
-        """Map a cell's (C_flat, rho) from the neural field to a scaled diffusion
-        condition (C11, C12, C66, vol).
+        """Map per-cell ``(C_flat, rho)`` from the neural field to scaled diffusion
+        conditions ``(C11, C22, C12, C66, vol)`` — the exact 5-dim order the model
+        was trained on (``TENSOR_DIM``; see ``microstructure_generation_2d``).
 
-        ``cell_C_flat`` carries the stiffness components (C11, C12, C66) directly
-        — the same components the diffusion was conditioned on and the scalers
-        were fit on, so they are scaled as-is (no lambda/mu detour).
+        ``cell_C_flat`` is ``(n, n_C)`` (a single ``(n_C,)`` is also accepted) in
+        the neural field's flat layout. It is reconstructed to the full stiffness
+        tensor and the four moduli are read out in diffusion order (see
+        :func:`moduli_in_diffusion_order`) **before** z-scoring — so this is correct
+        for any ``n_C_params`` (e.g. flat4's ``[C11, C22, C66, C12]`` is reordered to
+        ``[C11, C22, C12, C66]``). vol is the solid volume fraction
+        ``rho_eff / rho_solid`` (homogenize_simp uses ``rho_eff = vol * rho_solid``),
+        passed through unscaled. Returns ``(n, 5)`` (or ``(5,)`` for a single cell).
         """
-        c11, c12, c66 = (float(x) for x in np.asarray(cell_C_flat).ravel()[:3])
-        # vol = solid volume fraction. homogenize_simp uses rho_eff = vol * rho_solid,
-        # so invert: vol = rho_eff / rho_solid. (4th condition is passed unscaled.)
+        import jax  # the flat<->tensor converters are jnp-based
+        import jax.numpy as jnp
+        flat = np.atleast_2d(np.asarray(cell_C_flat, dtype=np.float64))  # (n, n_C)
+        _, from_flat = _get_converters(flat.shape[1])
+        C = np.asarray(jax.vmap(from_flat)(jnp.asarray(flat)))           # (n, 2,2,2,2)
+        moduli = moduli_in_diffusion_order(C, xp=np)                     # (n, 4)
+
+        scalers = (self.scaler_C11, self.scaler_C22, self.scaler_C12, self.scaler_C66)
+        scaled = np.stack(
+            [s.transform(moduli[:, i:i + 1])[:, 0] for i, s in enumerate(scalers)], axis=1
+        )  # (n, 4)
+
+        # vol = solid volume fraction; invert rho_eff = vol * rho_solid.
         rho_solid = self._cloak_layout().dp.rho0
-        vol = float(np.clip(cell_rho / rho_solid, 0.0, 1.0))
-        return np.array([
-            float(self.scaler_C11.transform([[c11]])[0, 0]),
-            float(self.scaler_C12.transform([[c12]])[0, 0]),
-            float(self.scaler_C66.transform([[c66]])[0, 0]),
-            vol,
-        ], dtype=np.float32)
+        rho = np.atleast_1d(np.asarray(cell_rho, dtype=np.float64))
+        vol = np.clip(rho / rho_solid, 0.0, 1.0)
+        out = np.concatenate([scaled, vol[:, None]], axis=1).astype(np.float32)  # (n, 5)
+        return out[0] if np.ndim(cell_C_flat) == 1 else out
 
     def _assemble_canvas(self, x_start, cloak_idx, n_cells, n_x, n_y):
         """Decode the per-cloak-cell predicted-clean images and tile them into the
@@ -194,7 +233,7 @@ class MultiscaleDiffusionModel:
         """
         arrs = x_start.detach().cpu().numpy()[:, 0]  # (n_cloak, H, H)
         cloak_geoms = np.stack([
-            _decode_to_50((a > 0).astype(np.uint8), compressed=self.diffusion_config.compressed)
+            _decode_to_50((a > 0).astype(np.uint8), compressed=self.compressed)
             for a in arrs
         ])  # (n_cloak, 50, 50)
         H = cloak_geoms.shape[1]
@@ -213,7 +252,7 @@ class MultiscaleDiffusionModel:
         :func:`tile_image_torch`.
         """
         occ = ((x_start + 1.0) / 2.0)[:, 0]  # (n_cloak, S, S) in [0, 1]
-        if self.diffusion_config.compressed:
+        if self.compressed:
             cells = unfold_mirror(occ)       # (n_cloak, 50, 50)
         else:
             cells = occ[..., _OFF:_OFF + CELL_SIZE, _OFF:_OFF + CELL_SIZE]
@@ -292,20 +331,25 @@ class MultiscaleDiffusionModel:
 
         cloak_idx_jnp = jnp.asarray(cloak_idx)
         cond_mean, cond_scale = self._scaler_params_jnp()
+        # flat<->tensor converter for the field's layout, so the reorder below is
+        # independent of n_C_params (flat4 = [C11, C22, C66, C12], etc.).
+        _, from_flat = _get_converters(reparam.C_flat_init.shape[1])
 
         def conditions_fn(theta):
-            """θ → (n_cloak, 4) scaled diffusion conditions (pure jnp).
+            """θ → (n_cloak, 5) scaled diffusion conditions (pure jnp).
 
-            jnp counterpart of :meth:`_cell_condition`: take (C11, C12, C66) as the
-            first three stiffness components, z-score with the fitted scalers, and
-            append ``vol = clip(rho/rho0, 0, 1)`` unscaled.
+            jnp counterpart of :meth:`_cell_condition`: reconstruct each cloak
+            cell's full stiffness tensor, read ``(C11, C22, C12, C66)`` in the
+            diffusion order (see :func:`moduli_in_diffusion_order`), z-score with the
+            fitted scalers, and append ``vol = clip(rho/rho0, 0, 1)`` unscaled.
             """
             cell_C, cell_rho = reparam.decode(theta)       # (n_cells, n_C), (n_cells,)
-            C_clk = cell_C[cloak_idx_jnp]                  # (n_cloak, n_C)
-            rho_clk = cell_rho[cloak_idx_jnp]              # (n_cloak,)
-            moduli = (C_clk[:, :3] - cond_mean) / cond_scale
+            C_clk = jax.vmap(from_flat)(cell_C[cloak_idx_jnp])  # (n_cloak, 2,2,2,2)
+            rho_clk = cell_rho[cloak_idx_jnp]                   # (n_cloak,)
+            moduli = moduli_in_diffusion_order(C_clk, xp=jnp)   # (n_cloak, 4)
+            moduli = (moduli - cond_mean) / cond_scale
             vol = jnp.clip(rho_clk / rho0, 0.0, 1.0)
-            return jnp.concatenate([moduli, vol[:, None]], axis=1)  # (n_cloak, 4)
+            return jnp.concatenate([moduli, vol[:, None]], axis=1)  # (n_cloak, 5)
 
         # ── (once) differentiable pixel-FEM objective (canvas → loss, g_canvas) ──
         canvas_shape = (n_y * CELL_SIZE, n_x * CELL_SIZE)
