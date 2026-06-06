@@ -26,7 +26,7 @@ import pytest
 # The whole module needs torch (multiscale_generation.model imports it at top).
 torch = pytest.importorskip("torch")
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 DEFAULT_CKPT = REPO / "output" / "diffusion_ca_squared" / "v2" / "last.ckpt"
 DEFAULT_SCALER_DIR = REPO / "microstructure_generation_2d"
 DEFAULT_CONFIG = REPO / "configs" / "cauchy_tri.yaml"

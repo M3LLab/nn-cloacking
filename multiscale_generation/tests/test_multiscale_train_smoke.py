@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 DEFAULT_CKPT = REPO / "output" / "diffusion_ca_squared" / "v1_ortho" / "last.ckpt"
 RAY_CONFIG = REPO / "output" / "cell20_flat4_materialreg" / "config.yaml"
 NF_WEIGHTS = REPO / "output" / "cell20_flat4_materialreg" / "best_weights.npz"

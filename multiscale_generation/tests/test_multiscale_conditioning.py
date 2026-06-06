@@ -24,7 +24,7 @@ import joblib
 import numpy as np
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 NF_PARAMS = REPO / "output" / "cell20_flat4_materialreg" / "optimized_params.npz"
 RAY_CONFIG = REPO / "output" / "cell20_flat4_materialreg" / "config.yaml"
 SCALER_DIR = REPO / "microstructure_generation_2d"

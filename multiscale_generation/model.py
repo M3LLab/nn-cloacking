@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import Callable, Optional
+
 import torch
 import numpy as np
 
@@ -36,6 +39,34 @@ def moduli_in_diffusion_order(C, xp=np):
         C[..., 0, 0, 1, 1],  # C12
         C[..., 0, 1, 0, 1],  # C66
     ], axis=-1)
+
+
+@dataclass
+class TrajectoryStep:
+    """One step of the ``predict_structure`` trajectory, handed to ``on_step``.
+
+    The optimisation loop emits this after each diffusion/Adam step so callers
+    can log, plot, or checkpoint without the loop owning any I/O.
+
+    Attributes
+    ----------
+    step : 0-based step index (== diffusion step == optimizer step).
+    n_steps : total steps in the trajectory.
+    loss : the full-structure FEM cloaking loss at this step (lower = better).
+    canvas : (n_y*CELL_SIZE, n_x*CELL_SIZE) soft occupancy in [0, 1] — the tiled
+        "combined topology" (cloak cells = generated microstructure, the rest
+        solid). Threshold at 0.5 for the binary structure.
+    theta : the MLP weights *after* this step's update (for checkpointing/resume).
+    """
+    step: int
+    n_steps: int
+    loss: float
+    canvas: np.ndarray
+    theta: list
+
+
+# A per-step callback: receives the TrajectoryStep, returns nothing.
+StepCallback = Callable[[TrajectoryStep], None]
 
 
 def tile_image_torch(geoms: torch.Tensor, n_x: int, n_y: int) -> torch.Tensor:
@@ -289,7 +320,8 @@ class MultiscaleDiffusionModel:
         )
 
     def predict_structure(self, X=None, lr=1e-3, refinement_factor=None,
-                          void_ratio=1e-6, simp_p=3.0, binarize=False):
+                          void_ratio=1e-6, simp_p=3.0, binarize=False,
+                          on_step: Optional[StepCallback] = None):
         """
         Optimize the neural field DURING a single diffusion sampling trajectory.
 
@@ -309,6 +341,12 @@ class MultiscaleDiffusionModel:
             g_conditions --[JAX vjp_θ]--> g_θ ; adam_update(θ)
 
         NB: this runs the full-structure FEM once per diffusion step (expensive).
+
+        ``on_step``, if given, is called once per step with a :class:`TrajectoryStep`
+        (step index, loss, the soft tiled canvas, and the updated θ) — the hook the
+        training driver (``multiscale_generation.optimize``) uses for loss logging,
+        per-step structure images, and θ checkpoints. I/O lives in the callback,
+        not in this loop.
 
         Returns ``(canvas, theta, loss_history)``: the final (binarized) tiled
         structure, the optimised MLP weights, and the per-step FEM loss.
@@ -361,8 +399,9 @@ class MultiscaleDiffusionModel:
 
         gen = self.generator
         tensor_w = self.diffusion_config.tensor_w
+        n_steps = self.diffusion_config.steps
         img, tensor_zero, time_pairs = gen.prepare_sampling(
-            batch_size=n_cloak, steps=self.diffusion_config.steps
+            batch_size=n_cloak, steps=n_steps
         )
         x_start = None
         canvas = None
@@ -397,7 +436,14 @@ class MultiscaleDiffusionModel:
             updates, opt_state = adam_update(g_theta, opt_state, lr=lr)
             theta = jax.tree.map(lambda p, u: p + u, theta, updates)
 
-            # (6) Detach carryover so each step builds its own single-step graph.
+            # (6) Emit the step event (logging / plotting / checkpoint live here).
+            if on_step is not None:
+                on_step(TrajectoryStep(
+                    step=step, n_steps=n_steps, loss=float(loss),
+                    canvas=canvas_torch.detach().cpu().numpy(), theta=theta,
+                ))
+
+            # (7) Detach carryover so each step builds its own single-step graph.
             img = img.detach()
             x_start = x_start.detach()
 

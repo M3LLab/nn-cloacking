@@ -56,9 +56,26 @@ class NeuralFieldConfig(BaseModel):
     ckpt: Optional[Path] = None
 
 
+class OptimizeConfig(BaseModel):
+    """Hyper-parameters for one ``predict_structure`` training trajectory.
+
+    The number of optimizer steps equals the number of diffusion steps
+    (``DiffusionConfig.steps``), so step count lives there, not here.
+    """
+
+    lr: float = 1e-3
+    refinement_factor: Optional[int] = None  # FEM mesh refinement (None => config's)
+    void_ratio: float = 1e-6                 # SIMP min density (void stiffness floor)
+    simp_p: float = 3.0                      # SIMP penalisation exponent
+    binarize: bool = False                   # threshold the canvas before the FEM
+    plot_every: int = 1                      # save a structure image every N steps (0 = off)
+    ckpt_every: int = 0                      # save θ every N steps (0 = final only)
+
+
 class MultiscaleConfig(BaseModel):
     """Everything :class:`MultiscaleDiffusionModel` needs, in one object."""
 
     diffusion: DiffusionConfig
     cell_decomposition: CellDecompositionConfig
     neural_field: NeuralFieldConfig
+    optimize: OptimizeConfig = OptimizeConfig()
