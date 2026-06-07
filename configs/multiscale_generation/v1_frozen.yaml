@@ -11,7 +11,7 @@
 diffusion:
   ckpt: output/diffusion_ca_squared/v1_ortho/last.ckpt
   scaler_dir: microstructure_generation_2d
-  steps: 50
+  steps: 10
   tensor_w: 2.0
 
 cell_decomposition:
@@ -24,5 +24,6 @@ neural_field:
   init_weights: output/cell20_flat4_materialreg_pt2/best_weights.npz
 
 optimize:
-  freeze: true        # NF frozen, grads not required, no optimizer step
+  freeze: true           # NF frozen, grads not required, no optimizer step
+  refinement_factor: 25   # FEM mesh refinement (null => use the rayleigh config's value)
   output_dir: output/multiscale_generation_v1_frozen

@@ -26,4 +26,5 @@ neural_field:
 
 optimize:
   lr: 1.0e-3
+  refinement_factor: 3   # FEM mesh refinement (null => use the rayleigh config's value)
   output_dir: output/multiscale_generation_v1
