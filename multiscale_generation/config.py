@@ -68,8 +68,10 @@ class OptimizeConfig(BaseModel):
     void_ratio: float = 1e-6                 # SIMP min density (void stiffness floor)
     simp_p: float = 3.0                      # SIMP penalisation exponent
     binarize: bool = False                   # threshold the canvas before the FEM
+    freeze: bool = False                     # if True: NF frozen, no grads/optimizer (eval-only)
     plot_every: int = 1                      # save a structure image every N steps (0 = off)
     ckpt_every: int = 0                      # save θ every N steps (0 = final only)
+    output_dir: Optional[Path] = None        # where to write artifacts (CLI --output-dir overrides)
 
 
 class MultiscaleConfig(BaseModel):
@@ -79,3 +81,12 @@ class MultiscaleConfig(BaseModel):
     cell_decomposition: CellDecompositionConfig
     neural_field: NeuralFieldConfig
     optimize: OptimizeConfig = OptimizeConfig()
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "MultiscaleConfig":
+        """Load a :class:`MultiscaleConfig` from a YAML file (see ``configs/multiscale_generation``)."""
+        import yaml
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**(data or {}))

@@ -321,6 +321,7 @@ class MultiscaleDiffusionModel:
 
     def predict_structure(self, X=None, lr=1e-3, refinement_factor=None,
                           void_ratio=1e-6, simp_p=3.0, binarize=False,
+                          freeze=False,
                           on_step: Optional[StepCallback] = None):
         """
         Optimize the neural field DURING a single diffusion sampling trajectory.
@@ -331,6 +332,13 @@ class MultiscaleDiffusionModel:
         FEM, compute the cloaking loss, and take one optimizer step on the (JAX)
         neural field — whose updated per-cell targets re-condition the next
         diffusion step. Hence #optimizer steps == #diffusion steps.
+
+        ``freeze=True`` disables optimisation entirely: the neural field that
+        supplies the per-cell conditions stays fixed at its initial θ, no gradients
+        are computed (the trajectory runs under ``torch.no_grad`` and the FEM loss is
+        forward-only), and no Adam step is taken. The full trajectory still runs and
+        the per-step FEM loss is logged via ``on_step`` — useful for evaluating a
+        warm-started field, or as a no-optimisation baseline.
 
         The gradient ``loss → canvas → diffusion → conditions → θ`` crosses the
         torch/JAX boundary by chaining three VJPs per step (no jax.custom_vjp):
@@ -365,7 +373,7 @@ class MultiscaleDiffusionModel:
 
         # ── (once) neural field + Adam + pure-jnp conditions function ──
         reparam, theta = self._load_neural_field()
-        opt_state = adam_init(theta)
+        opt_state = None if freeze else adam_init(theta)
 
         cloak_idx_jnp = jnp.asarray(cloak_idx)
         cond_mean, cond_scale = self._scaler_params_jnp()
@@ -407,39 +415,54 @@ class MultiscaleDiffusionModel:
         canvas = None
         loss_history: list[float] = []
 
+        # In freeze mode θ never changes, so the conditions are constant: compute
+        # them once and reuse (the trajectory below runs under no-grad).
+        frozen_cond = self._jnp_to_torch(conditions_fn(theta)) if freeze else None
+
         for step, (time, time_next) in time_pairs:
-            # (1) Per-cloak-cell conditions from the CURRENT neural field (JAX),
-            #     capturing the VJP so we can pull g_conditions back to θ.
-            conditions_jnp, vjp_theta = jax.vjp(conditions_fn, theta)
-            tensor_cond = self._jnp_to_torch(conditions_jnp, requires_grad=True)  # torch leaf
+            if freeze:
+                # Eval-only: fixed conditions, no graph, forward-only FEM, no update.
+                with torch.no_grad():
+                    img, x_start = gen.denoise_step(
+                        img, x_start, time, time_next, frozen_cond, tensor_zero, tensor_w
+                    )
+                    canvas_torch = self._assemble_canvas_torch(x_start, cloak_idx, n_cells, n_x, n_y)
+                loss = float(objective.loss_only(self._torch_to_jnp(canvas_torch)))
+            else:
+                # (1) Per-cloak-cell conditions from the CURRENT neural field (JAX),
+                #     capturing the VJP so we can pull g_conditions back to θ.
+                conditions_jnp, vjp_theta = jax.vjp(conditions_fn, theta)
+                tensor_cond = self._jnp_to_torch(conditions_jnp, requires_grad=True)  # torch leaf
 
-            # (2) One diffusion step for all cloak cells (grad-enabled).
-            img, x_start = gen.denoise_step(
-                img, x_start, time, time_next, tensor_cond, tensor_zero, tensor_w
-            )
+                # (2) One diffusion step for all cloak cells (grad-enabled).
+                img, x_start = gen.denoise_step(
+                    img, x_start, time, time_next, tensor_cond, tensor_zero, tensor_w
+                )
 
-            # (3) Differentiable decode + tile into the full structure (torch).
-            canvas_torch = self._assemble_canvas_torch(x_start, cloak_idx, n_cells, n_x, n_y)
+                # (3) Differentiable decode + tile into the full structure (torch).
+                canvas_torch = self._assemble_canvas_torch(x_start, cloak_idx, n_cells, n_x, n_y)
 
-            # (4) Pixel-level full-structure FEM loss + grad w.r.t. canvas (JAX).
-            loss, g_canvas_jnp = objective(self._torch_to_jnp(canvas_torch))
-            loss_history.append(float(loss))
+                # (4) Pixel-level full-structure FEM loss + grad w.r.t. canvas (JAX).
+                loss_jnp, g_canvas_jnp = objective(self._torch_to_jnp(canvas_torch))
+                loss = float(loss_jnp)
 
-            # (5) Chain VJPs back to θ and take one Adam step.
-            #     g_canvas --autograd.grad--> g_conditions --vjp_θ--> g_θ.
-            g_canvas_torch = self._jnp_to_torch(g_canvas_jnp)
-            g_cond_torch, = torch.autograd.grad(canvas_torch, tensor_cond, grad_outputs=g_canvas_torch)
-            # The cotangent must match conditions_jnp's dtype (torch is f32; the NF
-            # may decode to f64), so cast before crossing back into vjp_theta.
-            g_cond_jnp = self._torch_to_jnp(g_cond_torch).astype(conditions_jnp.dtype)
-            g_theta, = vjp_theta(g_cond_jnp)
-            updates, opt_state = adam_update(g_theta, opt_state, lr=lr)
-            theta = jax.tree.map(lambda p, u: p + u, theta, updates)
+                # (5) Chain VJPs back to θ and take one Adam step.
+                #     g_canvas --autograd.grad--> g_conditions --vjp_θ--> g_θ.
+                g_canvas_torch = self._jnp_to_torch(g_canvas_jnp)
+                g_cond_torch, = torch.autograd.grad(canvas_torch, tensor_cond, grad_outputs=g_canvas_torch)
+                # The cotangent must match conditions_jnp's dtype (torch is f32; the NF
+                # may decode to f64), so cast before crossing back into vjp_theta.
+                g_cond_jnp = self._torch_to_jnp(g_cond_torch).astype(conditions_jnp.dtype)
+                g_theta, = vjp_theta(g_cond_jnp)
+                updates, opt_state = adam_update(g_theta, opt_state, lr=lr)
+                theta = jax.tree.map(lambda p, u: p + u, theta, updates)
+
+            loss_history.append(loss)
 
             # (6) Emit the step event (logging / plotting / checkpoint live here).
             if on_step is not None:
                 on_step(TrajectoryStep(
-                    step=step, n_steps=n_steps, loss=float(loss),
+                    step=step, n_steps=n_steps, loss=loss,
                     canvas=canvas_torch.detach().cpu().numpy(), theta=theta,
                 ))
 

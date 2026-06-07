@@ -14,7 +14,11 @@ emits a :class:`TrajectoryStep` per step (step index, FEM loss, the soft tiled
 canvas, and the updated θ). Each callback consumes that event independently, so
 logging / plotting / checkpointing compose without entangling the optimisation.
 
-CLI::
+CLI — from a single YAML (see ``configs/multiscale_generation/``)::
+
+    python -m multiscale_generation.optimize --yaml configs/multiscale_generation/v1.yaml
+
+or with explicit per-field flags::
 
     python -m multiscale_generation.optimize \\
         --ckpt output/diffusion_ca_squared/v1_ortho/last.ckpt \\
@@ -203,6 +207,7 @@ def run_optimization(config: MultiscaleConfig, output_dir, device=None):
         canvas, theta, loss_history = model.predict_structure(
             lr=opt.lr, refinement_factor=opt.refinement_factor,
             void_ratio=opt.void_ratio, simp_p=opt.simp_p, binarize=opt.binarize,
+            freeze=opt.freeze,
             on_step=on_step,
         )
     finally:
@@ -236,8 +241,9 @@ def _build_config(a: argparse.Namespace) -> MultiscaleConfig:
         ),
         optimize=OptimizeConfig(
             lr=a.lr, refinement_factor=a.refinement_factor, void_ratio=a.void_ratio,
-            simp_p=a.simp_p, binarize=a.binarize,
+            simp_p=a.simp_p, binarize=a.binarize, freeze=a.freeze,
             plot_every=a.plot_every, ckpt_every=a.ckpt_every,
+            output_dir=a.output_dir,
         ),
     )
 
@@ -245,10 +251,14 @@ def _build_config(a: argparse.Namespace) -> MultiscaleConfig:
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--ckpt", required=True, help="diffusion .ckpt")
-    p.add_argument("--config", required=True,
-                   help="rayleigh SimulationConfig YAML (cloak layout)")
-    p.add_argument("--output-dir", required=True)
+    # Full-run config from a single YAML (see configs/multiscale_generation/). When
+    # given, the per-field args below are ignored; --output-dir / --device still override.
+    p.add_argument("--yaml", default=None,
+                   help="MultiscaleConfig YAML; if set, the per-field args below are ignored")
+    p.add_argument("--ckpt", help="diffusion .ckpt")
+    p.add_argument("--config", help="rayleigh SimulationConfig YAML (cloak layout)")
+    p.add_argument("--output-dir", default=None,
+                   help="artifact dir (overrides optimize.output_dir from the YAML)")
     p.add_argument("--scaler-dir", default="microstructure_generation_2d")
     p.add_argument("--steps", type=int, default=50, help="diffusion == optimizer steps")
     p.add_argument("--tensor-w", type=float, default=2.0)
@@ -267,12 +277,26 @@ def main() -> None:
     p.add_argument("--void-ratio", type=float, default=1e-6)
     p.add_argument("--simp-p", type=float, default=3.0)
     p.add_argument("--binarize", action="store_true")
+    p.add_argument("--freeze", action="store_true",
+                   help="disable optimisation: NF frozen, no grads, forward-only eval")
     p.add_argument("--plot-every", type=int, default=1)
     p.add_argument("--ckpt-every", type=int, default=0)
     p.add_argument("--device", default=None)
     a = p.parse_args()
 
-    result = run_optimization(_build_config(a), a.output_dir, device=a.device)
+    if a.yaml:
+        config = MultiscaleConfig.from_yaml(a.yaml)
+    else:
+        if not a.ckpt or not a.config:
+            p.error("--ckpt and --config are required unless --yaml is given")
+        config = _build_config(a)
+
+    # --output-dir wins; otherwise fall back to optimize.output_dir from the YAML.
+    output_dir = a.output_dir or config.optimize.output_dir
+    if output_dir is None:
+        p.error("no output dir: pass --output-dir or set optimize.output_dir in the YAML")
+
+    result = run_optimization(config, output_dir, device=a.device)
     lh = result["loss_history"]
     print(f"Done: {len(lh)} steps -> {result['output_dir']}")
     if lh:

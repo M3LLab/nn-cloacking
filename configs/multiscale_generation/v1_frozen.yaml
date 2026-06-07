@@ -1,0 +1,28 @@
+# Multiscale generation v1 — optimisation DISABLED (eval-only baseline).
+#
+# Same diffusion / cloak / neural-field setup as v1.yaml, but optimize.freeze=true:
+# the neural field that supplies the per-cell conditions stays fixed at its
+# warm-started weights, NO gradients are computed (trajectory runs under no-grad,
+# forward-only FEM), and no optimizer step is taken. The full sampling trajectory
+# still runs and the per-step FEM cloaking loss is logged.
+#
+# Run with:  python -m multiscale_generation.optimize --yaml configs/multiscale_generation/v1_frozen.yaml
+
+diffusion:
+  ckpt: output/diffusion_ca_squared/v1_ortho/last.ckpt
+  scaler_dir: microstructure_generation_2d
+  steps: 50
+  tensor_w: 2.0
+
+cell_decomposition:
+  config_path: output/cell20_flat4_materialreg_pt2/config.yaml
+
+neural_field:
+  hidden_size: 512
+  n_layers: 6
+  n_fourier: 64
+  init_weights: output/cell20_flat4_materialreg_pt2/best_weights.npz
+
+optimize:
+  freeze: true        # NF frozen, grads not required, no optimizer step
+  output_dir: output/multiscale_generation_v1_frozen
