@@ -521,45 +521,86 @@ def flat4_loss(
 
 def gate_connectivity_loss(
     canvas: jnp.ndarray,
-    n_steps: int = 100,
+    n_steps: int = 200,
     gate_width: int = _GATE_WIDTH,
     quadrant_N: int = _QUADRANT_N,
+    sharpness: float = 10.0,
 ) -> jnp.ndarray:
-    """Differentiable gate-to-gate connectivity loss via soft max-flood.
+    """Strict differentiable gate connectivity loss via sharpened multi-source flood.
 
-    Floods from the top-edge gate pixels through solid material and measures
-    mean reachability at the bottom, left, and right edge gates.  Returns a
-    value in [0, 3]: 0 when all three target gates are fully reachable.
+    Sharpens occupancy with sigmoid((occ - 0.5) * sharpness) so pixels below
+    0.5 nearly block the flood and pixels above 0.5 nearly pass it — much
+    closer to binary connectivity than raw soft occupancy.
 
-    A pixel with occupancy occ passes occ × (best incoming reach) per step,
-    so high-occ pixels transmit the signal faithfully while void blocks it.
-    n_steps must be ≥ grid diameter; for a 50×50 canvas use ≥ 100.
+    Floods simultaneously from all 4 gate groups (top, bottom, left, right)
+    as separate channels and checks all 12 pairwise reachability values.
+    Returns a value in [0, 3]: 0 when every gate pair is fully reachable.
     """
     canvas = canvas.astype(jnp.float32)
     H, W = canvas.shape
     N = quadrant_N
-    gs = (N - gate_width) // 2   # gate start in quadrant-edge coords
+    gs = (N - gate_width) // 2
     ge = gs + gate_width
 
-    # Source: both top-edge gate strips (TL and TR quadrant contributions)
-    source = jnp.zeros((H, W), dtype=jnp.float32)
-    source = source.at[0, gs:ge].set(1.0)
-    source = source.at[0, W - ge : W - gs].set(1.0)
+    # Sharpen: sub-0.5 pixels nearly block the flood; super-0.5 nearly pass.
+    occ = jax.nn.sigmoid((canvas - 0.5) * sharpness)   # (H, W)
 
-    def _step(_, reach: jnp.ndarray) -> jnp.ndarray:
+    # Build 4 source masks: top, bottom, left, right — each activates both
+    # gate slots on that edge (one per quadrant, e.g. left has rows gs:ge and H-ge:H-gs).
+    top_s = np.zeros((H, W), dtype=np.float32)
+    top_s[0, gs:ge] = 1.0
+    top_s[0, W - ge : W - gs] = 1.0
+
+    bot_s = np.zeros((H, W), dtype=np.float32)
+    bot_s[H - 1, gs:ge] = 1.0
+    bot_s[H - 1, W - ge : W - gs] = 1.0
+
+    lft_s = np.zeros((H, W), dtype=np.float32)
+    lft_s[gs:ge, 0] = 1.0
+    lft_s[H - ge : H - gs, 0] = 1.0
+
+    rgt_s = np.zeros((H, W), dtype=np.float32)
+    rgt_s[gs:ge, W - 1] = 1.0
+    rgt_s[H - ge : H - gs, W - 1] = 1.0
+
+    sources = jnp.array(np.stack([top_s, bot_s, lft_s, rgt_s]))   # (4, H, W)
+
+    @jax.checkpoint
+    def _step(reach: jnp.ndarray, _) -> tuple[jnp.ndarray, None]:
+        # reach: (4, H, W).  Zero-pad to prevent wrap-around paths.
         nbr = jnp.maximum(
-            jnp.maximum(jnp.roll(reach, 1, axis=0), jnp.roll(reach, -1, axis=0)),
-            jnp.maximum(jnp.roll(reach, 1, axis=1), jnp.roll(reach, -1, axis=1)),
+            jnp.maximum(
+                jnp.pad(reach[:, :-1, :], ((0, 0), (1, 0), (0, 0))),  # from above
+                jnp.pad(reach[:, 1:, :],  ((0, 0), (0, 1), (0, 0))),  # from below
+            ),
+            jnp.maximum(
+                jnp.pad(reach[:, :, :-1], ((0, 0), (0, 0), (1, 0))),  # from left
+                jnp.pad(reach[:, :, 1:],  ((0, 0), (0, 0), (0, 1))),  # from right
+            ),
         )
-        return jnp.maximum(source, canvas * nbr)
+        return jnp.maximum(sources, occ[None] * nbr), None
 
-    reach = jax.lax.fori_loop(0, n_steps, _step, source)
+    reach, _ = jax.lax.scan(_step, sources, None, length=n_steps)   # (4, H, W)
 
-    r_bottom = reach[H - 1, gs:ge].mean()
-    r_left   = reach[gs:ge, 0].mean()
-    r_right  = reach[gs:ge, W - 1].mean()
+    def _gate_reach(reach_k: jnp.ndarray, edge: int) -> jnp.ndarray:
+        """Mean reach at both gate slots of the given edge (0=top,1=bot,2=left,3=right)."""
+        if edge == 0:  # top
+            return 0.5 * (reach_k[0, gs:ge].mean() + reach_k[0, W - ge : W - gs].mean())
+        elif edge == 1:  # bottom
+            return 0.5 * (reach_k[H - 1, gs:ge].mean() + reach_k[H - 1, W - ge : W - gs].mean())
+        elif edge == 2:  # left
+            return 0.5 * (reach_k[gs:ge, 0].mean() + reach_k[H - ge : H - gs, 0].mean())
+        else:  # right
+            return 0.5 * (reach_k[gs:ge, W - 1].mean() + reach_k[H - ge : H - gs, W - 1].mean())
 
-    return (1.0 - r_bottom) + (1.0 - r_left) + (1.0 - r_right)
+    # Sum (1 - reach) over all 12 ordered (source, target) pairs; divide by 4
+    # so the range stays [0, 3] and weight_conn doesn't need retuning.
+    loss = jnp.zeros(())
+    for src in range(4):
+        for tgt in range(4):
+            if tgt != src:
+                loss = loss + (1.0 - _gate_reach(reach[src], tgt))
+    return loss / 4.0
 
 
 # ── Optimization result ────────────────────────────────────────────────
@@ -590,7 +631,7 @@ def run_cell_design(
     weights: jnp.ndarray | None = None,
     weight_rho: float = 1.0,
     weight_conn: float = 10.0,
-    conn_steps: int = 100,
+    conn_steps: int = 200,
     n_iters: int = 100,
     lr: float = 1e-3,
     lr_end: float | None = None,

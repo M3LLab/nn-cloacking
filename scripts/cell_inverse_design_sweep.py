@@ -106,9 +106,12 @@ def find_nn_quadrant(
     target_rho: float,
     ds: DatasetCache,
     rho_weight: float = 1.0,
-) -> np.ndarray:
-    """Find the dataset cell nearest to (target_flat4, target_rho) and return
-    its top-left 25×25 quadrant as a uint8 array.
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Find the dataset cell nearest to (target_flat4, target_rho).
+
+    Returns (quadrant_25x25, nn_flat4, nn_rho) where nn_flat4 and nn_rho are
+    the dataset-stored values for the matched cell (computed with dataset FEM
+    settings, which may differ from the inverse-design FEM settings).
 
     Matching is done in standardised [C11, C22, C12, C66, rho] space.
     ``rho_weight`` rescales the rho column (>1 → more rho-sensitive).
@@ -127,11 +130,16 @@ def find_nn_quadrant(
     d2   = np.einsum("ij,ij->i", diff, diff)
     nn_idx = int(np.argmin(d2))
 
+    # Recover un-standardised NN parameters
+    nn_params = ds.Xs[nn_idx] * ds.std + ds.mean   # [C11, C22, C12, C66, rho]
+    nn_flat4 = nn_params[:4].astype(np.float64)
+    nn_rho   = float(nn_params[4])
+
     with h5py.File(str(ds.h5_path), "r") as f:
         cell_50x50 = np.asarray(f["cells"][nn_idx])   # (50, 50) uint8
 
     # Top-left 25×25 is the original quadrant before squared assembly
-    return cell_50x50[:25, :25]
+    return cell_50x50[:25, :25], nn_flat4, nn_rho
 
 
 # ── cloak mask from optimization config ──────────────────────────────
@@ -273,11 +281,15 @@ def design_one_cell(
     # Nearest-neighbour initialisation
     initial_quadrant = None
     if ds_cache is not None:
-        initial_quadrant = find_nn_quadrant(
+        initial_quadrant, nn_flat4, nn_rho = find_nn_quadrant(
             target_flat4, target_rho, ds_cache, rho_weight=nn_rho_weight,
         )
         nn_vf = float(initial_quadrant.mean())
-        print(f"  NN init: quadrant vf={nn_vf:.3f}")
+        nn_f4_str = "[" + ", ".join(f"{v:.3e}" for v in nn_flat4) + "]"
+        nn_rel = np.abs((nn_flat4 - target_flat4) / (np.abs(target_flat4) + 1e-30))
+        print(f"  NN init: quadrant vf={nn_vf:.3f}  rho={nn_rho:.1f}"
+              f"  flat4={nn_f4_str}"
+              f"  (max rel err vs target: {nn_rel.max():.2%})")
 
     # Build neural field (deterministic seed per cell)
     theta_init, nf = make_cell_neural_field(
@@ -407,7 +419,7 @@ def main() -> None:
                         help="Index into the cloak-cell list to start from")
     parser.add_argument("--num", type=int, default=None,
                         help="Number of cloak cells to process (default: all)")
-    parser.add_argument("--n-iters", type=int, default=200,
+    parser.add_argument("--n-iters", type=int, default=1000,
                         help="Max Adam steps per cell (default 100)")
     parser.add_argument("--tol", type=float, default=0.001,
                         help="Early-stop threshold: max relative error (default 0.001)")
