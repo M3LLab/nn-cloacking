@@ -52,7 +52,11 @@ class TrajectoryStep:
     ----------
     step : 0-based step index (== diffusion step == optimizer step).
     n_steps : total steps in the trajectory.
-    loss : the full-structure FEM cloaking loss at this step (lower = better).
+    loss : the full-structure FEM cloaking loss at this step (lower = better). This
+        is the SIMP-soft transmitted-displacement ratio on ``canvas``.
+    ratio : transmitted-displacement ratio of the *binarized* (physical) structure
+        — the metric ``scripts/frequency_sweep.py`` reports (1.0 = perfect cloak).
+        Distinct from ``loss``, which is evaluated on the soft canvas.
     canvas : (n_y*CELL_SIZE, n_x*CELL_SIZE) soft occupancy in [0, 1] — the tiled
         "combined topology" (cloak cells = generated microstructure, the rest
         solid). Threshold at 0.5 for the binary structure.
@@ -61,6 +65,7 @@ class TrajectoryStep:
     step: int
     n_steps: int
     loss: float
+    ratio: float
     canvas: np.ndarray
     theta: list
 
@@ -351,10 +356,11 @@ class MultiscaleDiffusionModel:
         NB: this runs the full-structure FEM once per diffusion step (expensive).
 
         ``on_step``, if given, is called once per step with a :class:`TrajectoryStep`
-        (step index, loss, the soft tiled canvas, and the updated θ) — the hook the
-        training driver (``multiscale_generation.optimize``) uses for loss logging,
-        per-step structure images, and θ checkpoints. I/O lives in the callback,
-        not in this loop.
+        (step index, soft loss, the binarized-structure cloaking ``ratio``, the soft
+        tiled canvas, and the updated θ) — the hook the training driver
+        (``multiscale_generation.optimize``) uses for loss/ratio logging, per-step
+        structure images, and θ checkpoints. I/O lives in the callback, not in this
+        loop.
 
         Returns ``(canvas, theta, loss_history)``: the final (binarized) tiled
         structure, the optimised MLP weights, and the per-step FEM loss.
@@ -459,10 +465,16 @@ class MultiscaleDiffusionModel:
 
             loss_history.append(loss)
 
+            # Physical cloaking metric: the transmitted-displacement ratio of the
+            # *binarized* structure (one extra forward solve), matching what
+            # ``scripts/frequency_sweep.py`` reports — distinct from the SIMP-soft
+            # ``loss`` above. 1.0 == perfect cloak.
+            ratio = objective.physical_ratio(self._torch_to_jnp(canvas_torch))
+
             # (6) Emit the step event (logging / plotting / checkpoint live here).
             if on_step is not None:
                 on_step(TrajectoryStep(
-                    step=step, n_steps=n_steps, loss=loss,
+                    step=step, n_steps=n_steps, loss=loss, ratio=ratio,
                     canvas=canvas_torch.detach().cpu().numpy(), theta=theta,
                 ))
 

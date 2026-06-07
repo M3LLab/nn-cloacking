@@ -5,7 +5,7 @@ neural field *during* one diffusion sampling trajectory (one Adam step per
 diffusion step) — with disk-backed **callbacks**, so the bridge loop stays free of
 any I/O:
 
-* :class:`LossLogger`       — append ``step,loss`` to ``loss_history.csv``.
+* :class:`LossLogger`       — append ``step,loss,ratio`` to ``loss_history.csv``.
 * :class:`StructurePlotter` — save the tiled "combined topology" image each step.
 * :class:`ThetaCheckpointer`— periodically ``save_theta`` for resume.
 
@@ -48,17 +48,24 @@ from .model import MultiscaleDiffusionModel, TrajectoryStep
 
 
 class LossLogger:
-    """Append ``step,loss`` to a CSV (flushed each step) and keep the history."""
+    """Append ``step,loss,ratio`` to a CSV (flushed each step) and keep the history.
+
+    ``loss`` is the SIMP-soft cloaking loss the optimiser descends; ``ratio`` is the
+    transmitted-displacement ratio of the binarized physical structure (1.0 =
+    perfect cloak), the metric ``scripts/frequency_sweep.py`` reports.
+    """
 
     def __init__(self, path):
         self.path = Path(path)
         self._f = open(self.path, "w", buffering=1)  # line-buffered
-        self._f.write("step,loss\n")
+        self._f.write("step,loss,ratio\n")
         self.history: list[float] = []
+        self.ratio_history: list[float] = []
 
     def __call__(self, s: TrajectoryStep) -> None:
         self.history.append(s.loss)
-        self._f.write(f"{s.step},{s.loss:.8e}\n")
+        self.ratio_history.append(s.ratio)
+        self._f.write(f"{s.step},{s.loss:.8e},{s.ratio:.8e}\n")
 
     def close(self) -> None:
         self._f.close()
@@ -89,7 +96,8 @@ class StructurePlotter:
         img = (s.canvas > 0.5).astype(float) if self.binarize else s.canvas
         save_canvas_png(
             img, self.frames_dir / f"step_{s.step:04d}.png",
-            title=f"step {s.step + 1}/{s.n_steps}   loss={s.loss:.4e}", cmap=self.cmap,
+            title=f"step {s.step + 1}/{s.n_steps}   loss={s.loss:.4e}   ratio={s.ratio:.4f}",
+            cmap=self.cmap,
         )
 
 
@@ -155,6 +163,24 @@ def save_loss_curve(history, path):
     plt.close(fig)
 
 
+def save_ratio_curve(history, path):
+    """Plot the per-step transmitted-displacement ratio (1.0 = perfect cloak)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(range(len(history)), history, marker="o", ms=3, color="C0")
+    ax.axhline(1.0, color="gray", ls="--", lw=0.8, alpha=0.6, label="perfect cloak")
+    ax.set_xlabel("step")
+    ax.set_ylabel(r"$\langle |u| \rangle \,/\, \langle |u_{\rm ref}| \rangle$")
+    ax.set_title("Physical (binarized) cloaking ratio")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.savefig(path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+
 def try_make_gif(frames_dir, out_path, fps: int = 5) -> bool:
     """Best-effort GIF of the per-step structure frames (needs Pillow)."""
     try:
@@ -179,12 +205,13 @@ def run_optimization(config: MultiscaleConfig, output_dir, device=None):
     """Run one ``predict_structure`` trajectory and persist all artifacts.
 
     Writes, under ``output_dir``: ``multiscale_config.json`` (provenance),
-    ``loss_history.csv`` + ``loss_curve.png``, ``frames/step_*.png`` (and a
-    ``structure_evolution.gif`` if Pillow is present), ``final_canvas.npy`` +
-    ``final_structure.png``, and ``theta_final.npz`` (plus periodic
-    ``theta_step_*.npz`` if ``optimize.ckpt_every`` > 0).
+    ``loss_history.csv`` (``step,loss,ratio``) + ``loss_curve.png`` +
+    ``ratio_curve.png``, ``frames/step_*.png`` (and a ``structure_evolution.gif``
+    if Pillow is present), ``final_canvas.npy`` + ``final_structure.png``, and
+    ``theta_final.npz`` (plus periodic ``theta_step_*.npz`` if
+    ``optimize.ckpt_every`` > 0).
 
-    Returns ``{"canvas", "theta", "loss_history", "output_dir"}``.
+    Returns ``{"canvas", "theta", "loss_history", "ratio_history", "output_dir"}``.
     """
     import torch
 
@@ -213,19 +240,28 @@ def run_optimization(config: MultiscaleConfig, output_dir, device=None):
     finally:
         loss_logger.close()
 
+    ratio_history = loss_logger.ratio_history
+
     # Final artifacts.
     np.save(out / "final_canvas.npy", np.asarray(canvas))
+    if loss_history and ratio_history:
+        final_title = f"final   loss={loss_history[-1]:.4e}   ratio={ratio_history[-1]:.4f}"
+    else:
+        final_title = "final"
     save_canvas_png(
         np.asarray(canvas, dtype=float), out / "final_structure.png",
-        title=(f"final   loss={loss_history[-1]:.4e}" if loss_history else "final"),
+        title=final_title,
     )
     save_theta(theta, str(out / "theta_final.npz"))
     if loss_history:
         save_loss_curve(loss_history, out / "loss_curve.png")
+    if ratio_history:
+        save_ratio_curve(ratio_history, out / "ratio_curve.png")
     try_make_gif(out / "frames", out / "structure_evolution.gif")
 
     return {"canvas": canvas, "theta": theta,
-            "loss_history": loss_history, "output_dir": str(out)}
+            "loss_history": loss_history, "ratio_history": ratio_history,
+            "output_dir": str(out)}
 
 
 def _build_config(a: argparse.Namespace) -> MultiscaleConfig:
@@ -298,9 +334,12 @@ def main() -> None:
 
     result = run_optimization(config, output_dir, device=a.device)
     lh = result["loss_history"]
+    rh = result["ratio_history"]
     print(f"Done: {len(lh)} steps -> {result['output_dir']}")
     if lh:
         print(f"  loss[0]={lh[0]:.4e}  loss[-1]={lh[-1]:.4e}")
+    if rh:
+        print(f"  ratio[0]={rh[0]:.4f}  ratio[-1]={rh[-1]:.4f}  (1.0 = perfect cloak)")
 
 
 if __name__ == "__main__":

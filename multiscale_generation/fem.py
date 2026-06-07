@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import logging
 
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
@@ -44,6 +45,9 @@ from rayleigh_cloak.problem import (
     _make_top_surface,
 )
 from rayleigh_cloak.solver import _create_geometry, solve_reference
+
+
+logging.getLogger("jax_fem").setLevel(logging.WARNING)
 
 
 # ── cloak grid / decomposition ──────────────────────────────────────
@@ -354,6 +358,20 @@ class PixelFEMObjective:
         """Forward-only loss on ``canvas`` (for consistency checks)."""
         sol_list = self.fwd_pred(jnp.asarray(canvas, dtype=jnp.float32))
         return _jnp_transmitted_ratio(sol_list[0], self.u_ref_surf, self.case_surf_idx)
+
+    def physical_ratio(self, canvas) -> float:
+        """Transmitted-displacement ratio of the *binarized* (physical) structure.
+
+        Thresholds ``canvas`` at 0.5 and runs the forward FEM only, so the value
+        is the true cloaking performance of the binary microstructure — the metric
+        ``scripts/frequency_sweep.py`` reports (``<|u|> / <|u_ref|>``; 1.0 = perfect
+        cloak) — as opposed to the SIMP-soft ``loss`` the optimiser descends. With
+        a ``{0, 1}`` occupancy the SIMP map collapses to hard solid/void for any
+        ``simp_p``, so this is the physical structure regardless of how the
+        objective was built. Costs one extra forward solve per call.
+        """
+        hard = jnp.where(jnp.asarray(canvas, dtype=jnp.float32) > 0.5, 1.0, 0.0)
+        return float(self.loss_only(hard))
 
 
 def build_pixel_objective(
