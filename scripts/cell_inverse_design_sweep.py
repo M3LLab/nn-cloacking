@@ -57,14 +57,81 @@ from dataset.cellular_chiral.inverse_design import (
 )
 
 import logging
+from dataclasses import dataclass
+
+import h5py
 
 logging.getLogger("jax_fem").setLevel(logging.WARNING)
-
 
 
 # ── flat4 component labels ────────────────────────────────────────────
 
 _FLAT4_LABELS = ["C11", "C22", "C12", "C66"]
+
+
+# ── dataset nearest-neighbour matching ───────────────────────────────
+
+@dataclass
+class DatasetCache:
+    """Pre-loaded dataset features for fast nearest-neighbour lookup."""
+    Xs: np.ndarray    # (n, 5) standardised [C11, C22, C12, C66, rho]
+    mean: np.ndarray  # (5,)
+    std: np.ndarray   # (5,)
+    h5_path: Path
+    n: int
+
+
+def load_dataset_for_matching(h5_path: Path) -> DatasetCache:
+    """Load scalar features from stiffness.h5 and standardise.
+
+    Features: [C11, C22, C12, C66, rho] — the same quantities we optimise.
+    """
+    print(f"Loading dataset features from {h5_path} ...")
+    with h5py.File(str(h5_path), "r") as f:
+        C11 = f["C11"][:]
+        C22 = f["C22"][:]
+        C12 = f["C12"][:]
+        C66 = f["C66"][:]
+        rho = f["rho"][:]
+    X = np.column_stack([C11, C22, C12, C66, rho]).astype(np.float64)
+    mean = X.mean(axis=0)
+    std  = X.std(axis=0) + 1e-30
+    Xs   = (X - mean) / std
+    print(f"  {len(C11)} dataset cells loaded.")
+    return DatasetCache(Xs=Xs, mean=mean, std=std, h5_path=h5_path, n=len(C11))
+
+
+def find_nn_quadrant(
+    target_flat4: np.ndarray,
+    target_rho: float,
+    ds: DatasetCache,
+    rho_weight: float = 1.0,
+) -> np.ndarray:
+    """Find the dataset cell nearest to (target_flat4, target_rho) and return
+    its top-left 25×25 quadrant as a uint8 array.
+
+    Matching is done in standardised [C11, C22, C12, C66, rho] space.
+    ``rho_weight`` rescales the rho column (>1 → more rho-sensitive).
+    """
+    q = np.array([target_flat4[0], target_flat4[1],
+                  target_flat4[2], target_flat4[3], float(target_rho)],
+                 dtype=np.float64)
+    q_std = (q - ds.mean) / ds.std
+
+    weights = np.array([1.0, 1.0, 1.0, 1.0, rho_weight])
+    Xs_w  = ds.Xs  * weights[None, :]
+    q_w   = q_std  * weights
+
+    # Brute-force L2 (n_ds × 5 — fast enough for 156k)
+    diff = Xs_w - q_w[None, :]
+    d2   = np.einsum("ij,ij->i", diff, diff)
+    nn_idx = int(np.argmin(d2))
+
+    with h5py.File(str(ds.h5_path), "r") as f:
+        cell_50x50 = np.asarray(f["cells"][nn_idx])   # (50, 50) uint8
+
+    # Top-left 25×25 is the original quadrant before squared assembly
+    return cell_50x50[:25, :25]
 
 
 # ── cloak mask from optimization config ──────────────────────────────
@@ -175,6 +242,8 @@ def design_one_cell(
     weight_rho: float,
     tol: float,
     resume: bool,
+    ds_cache: DatasetCache | None = None,
+    nn_rho_weight: float = 1.0,
 ) -> dict | None:
     """Run inverse design for one cell; return summary dict or None on skip."""
     import jax.numpy as jnp
@@ -201,10 +270,20 @@ def design_one_cell(
     print(f"  Cell {cell_idx:03d}  target=[{', '.join(f'{v:.3e}' for v in target_flat4)}]"
           f"  rho={target_rho:.1f}")
 
-    # Build fresh neural field (deterministic seed per cell)
+    # Nearest-neighbour initialisation
+    initial_quadrant = None
+    if ds_cache is not None:
+        initial_quadrant = find_nn_quadrant(
+            target_flat4, target_rho, ds_cache, rho_weight=nn_rho_weight,
+        )
+        nn_vf = float(initial_quadrant.mean())
+        print(f"  NN init: quadrant vf={nn_vf:.3f}")
+
+    # Build neural field (deterministic seed per cell)
     theta_init, nf = make_cell_neural_field(
         n_fourier=n_fourier, hidden_size=hidden_size,
         n_layers=n_layers, seed=seed + cell_idx,
+        initial_quadrant=initial_quadrant,
     )
 
     t0 = time.perf_counter()
@@ -328,7 +407,7 @@ def main() -> None:
                         help="Index into the cloak-cell list to start from")
     parser.add_argument("--num", type=int, default=None,
                         help="Number of cloak cells to process (default: all)")
-    parser.add_argument("--n-iters", type=int, default=1000,
+    parser.add_argument("--n-iters", type=int, default=200,
                         help="Max Adam steps per cell (default 100)")
     parser.add_argument("--tol", type=float, default=0.001,
                         help="Early-stop threshold: max relative error (default 0.001)")
@@ -343,6 +422,13 @@ def main() -> None:
                         help="SIMP exponent (default 1 = linear; p>1 kills gradients at void)")
     parser.add_argument("--resume", action="store_true",
                         help="Skip cells whose output already contains canvas.npy")
+    parser.add_argument("--dataset-path", type=Path,
+                        default=Path("output/ca_bulk_squared/stiffness.h5"),
+                        help="HDF5 dataset for nearest-neighbour initialisation")
+    parser.add_argument("--no-nn-init", action="store_true",
+                        help="Disable nearest-neighbour initialisation (start from sigmoid=0.5)")
+    parser.add_argument("--nn-rho-weight", type=float, default=1.0,
+                        help="Weight for rho in NN matching distance (default 1.0)")
     args = parser.parse_args()
 
     opt_dir: Path = args.opt_dir
@@ -383,6 +469,15 @@ def main() -> None:
     out_dir = args.out_dir or (opt_dir / "cell_designs")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── load dataset for nearest-neighbour init ───────────────────────
+    ds_cache: DatasetCache | None = None
+    if not args.no_nn_init:
+        if not args.dataset_path.exists():
+            print(f"WARNING: dataset not found at {args.dataset_path}; "
+                  f"falling back to random init (pass --no-nn-init to suppress).")
+        else:
+            ds_cache = load_dataset_for_matching(args.dataset_path)
+
     # ── build shared FEM setup ────────────────────────────────────────
     print(f"\nBuilding FEM setup (f_star={f_star} Hz, simp_p={args.simp_p})...")
     setup = build_homog_setup(
@@ -412,6 +507,8 @@ def main() -> None:
             weight_rho=args.weight_rho,
             tol=args.tol,
             resume=args.resume,
+            ds_cache=ds_cache,
+            nn_rho_weight=args.nn_rho_weight,
         )
         if result is not None:
             summary.append(result)

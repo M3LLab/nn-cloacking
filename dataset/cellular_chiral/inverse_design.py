@@ -136,21 +136,36 @@ class CellNeuralField:
 
     Attributes
     ----------
-    features      : (N*N, n_feat) Fourier input features for the MLP
-    border_vals   : (N, N) clamped CA border values (0 or 1)
-    interior_mask : (N, N) bool — True where the MLP output is used
-    N             : quadrant size (default 25)
+    features         : (N*N, n_feat) Fourier input features for the MLP
+    border_vals      : (N, N) clamped CA border values (0 or 1)
+    interior_mask    : (N, N) bool — True where the MLP output is used
+    N                : quadrant size (default 25)
+    initial_quadrant : (N, N) float32 in (0, 1) — nearest-neighbour soft
+                       canvas for residual initialisation.  When provided,
+                       the MLP output is a logit-space correction on top of
+                       this initial canvas so the optimisation starts at the
+                       NN cell and refines from there.  None → standard
+                       sigmoid-only decode (starts at 0.5 everywhere).
     """
 
     features: jnp.ndarray
     border_vals: jnp.ndarray
     interior_mask: jnp.ndarray
     N: int = _QUADRANT_N
+    initial_quadrant: jnp.ndarray | None = None
 
     def decode_quadrant(self, theta: list[dict]) -> jnp.ndarray:
-        """theta → soft (N, N) quadrant with CA borders clamped."""
-        raw = mlp_forward(theta, self.features)      # (N*N, 1)
-        occ = jax.nn.sigmoid(raw[:, 0]).reshape(self.N, self.N)
+        """theta → soft (N, N) quadrant with CA borders clamped.
+
+        With ``initial_quadrant``: occ = sigmoid(logit(initial) + mlp_out).
+        Without              : occ = sigmoid(mlp_out).
+        """
+        raw = mlp_forward(theta, self.features)[:, 0].reshape(self.N, self.N)
+        if self.initial_quadrant is not None:
+            logit_init = jnp.log(self.initial_quadrant / (1.0 - self.initial_quadrant))
+            occ = jax.nn.sigmoid(logit_init + raw)
+        else:
+            occ = jax.nn.sigmoid(raw)
         return jnp.where(self.interior_mask, occ, self.border_vals)
 
     def decode_canvas(self, theta: list[dict]) -> jnp.ndarray:
@@ -169,8 +184,21 @@ def make_cell_neural_field(
     n_layers: int = 4,
     seed: int = 42,
     N: int = _QUADRANT_N,
+    initial_quadrant: np.ndarray | None = None,
+    initial_soft_eps: float = 0.05,
 ) -> tuple[list[dict], CellNeuralField]:
     """Initialise MLP weights and a CellNeuralField.
+
+    Parameters
+    ----------
+    initial_quadrant  : (N, N) uint8 or float32 array — nearest-neighbour
+                        cell quadrant (top-left N×N of a 2N×2N dataset cell).
+                        Binary {0,1} values are soft-clipped to
+                        (initial_soft_eps, 1-initial_soft_eps) so the logit
+                        is finite.  When provided the MLP is initialised to
+                        output ≈ 0 so optimisation starts at the NN cell.
+    initial_soft_eps  : clipping margin applied to binary initial_quadrant
+                        (default 0.05 → logit ≈ ±2.94).
 
     Returns
     -------
@@ -183,16 +211,25 @@ def make_cell_neural_field(
     layer_sizes = [n_in] + [hidden_size] * (n_layers - 1) + [1]
     key = jax.random.PRNGKey(seed)
     theta = init_mlp(key, layer_sizes)
-    # Scale last layer so initial output ≈ 0 → sigmoid ≈ 0.5 (start near half-solid)
+    # Small last layer: MLP output ≈ 0 at init.
+    # With initial_quadrant: starts at NN cell.  Without: starts at sigmoid(0)=0.5.
     theta[-1]["W"] = theta[-1]["W"] * 0.01
     theta[-1]["b"] = theta[-1]["b"] * 0.0
 
     border_vals, interior_mask = make_quadrant_border(_GATE_WIDTH, N)
+
+    init_q_jnp = None
+    if initial_quadrant is not None:
+        q = np.asarray(initial_quadrant, dtype=np.float32)
+        q = np.clip(q, initial_soft_eps, 1.0 - initial_soft_eps)
+        init_q_jnp = jnp.array(q)
+
     nf = CellNeuralField(
         features=features,
         border_vals=border_vals,
         interior_mask=interior_mask,
         N=N,
+        initial_quadrant=init_q_jnp,
     )
     return theta, nf
 
@@ -482,6 +519,49 @@ def flat4_loss(
     return jnp.sum(weights * rel ** 2)
 
 
+def gate_connectivity_loss(
+    canvas: jnp.ndarray,
+    n_steps: int = 100,
+    gate_width: int = _GATE_WIDTH,
+    quadrant_N: int = _QUADRANT_N,
+) -> jnp.ndarray:
+    """Differentiable gate-to-gate connectivity loss via soft max-flood.
+
+    Floods from the top-edge gate pixels through solid material and measures
+    mean reachability at the bottom, left, and right edge gates.  Returns a
+    value in [0, 3]: 0 when all three target gates are fully reachable.
+
+    A pixel with occupancy occ passes occ × (best incoming reach) per step,
+    so high-occ pixels transmit the signal faithfully while void blocks it.
+    n_steps must be ≥ grid diameter; for a 50×50 canvas use ≥ 100.
+    """
+    canvas = canvas.astype(jnp.float32)
+    H, W = canvas.shape
+    N = quadrant_N
+    gs = (N - gate_width) // 2   # gate start in quadrant-edge coords
+    ge = gs + gate_width
+
+    # Source: both top-edge gate strips (TL and TR quadrant contributions)
+    source = jnp.zeros((H, W), dtype=jnp.float32)
+    source = source.at[0, gs:ge].set(1.0)
+    source = source.at[0, W - ge : W - gs].set(1.0)
+
+    def _step(_, reach: jnp.ndarray) -> jnp.ndarray:
+        nbr = jnp.maximum(
+            jnp.maximum(jnp.roll(reach, 1, axis=0), jnp.roll(reach, -1, axis=0)),
+            jnp.maximum(jnp.roll(reach, 1, axis=1), jnp.roll(reach, -1, axis=1)),
+        )
+        return jnp.maximum(source, canvas * nbr)
+
+    reach = jax.lax.fori_loop(0, n_steps, _step, source)
+
+    r_bottom = reach[H - 1, gs:ge].mean()
+    r_left   = reach[gs:ge, 0].mean()
+    r_right  = reach[gs:ge, W - 1].mean()
+
+    return (1.0 - r_bottom) + (1.0 - r_left) + (1.0 - r_right)
+
+
 # ── Optimization result ────────────────────────────────────────────────
 
 
@@ -495,6 +575,7 @@ class CellDesignResult:
     loss_history: list[float] = field(default_factory=list)
     flat4_history: list[list[float]] = field(default_factory=list)
     rho_history: list[float] = field(default_factory=list)
+    conn_history: list[float] = field(default_factory=list)
 
 
 # ── Optimization loop ──────────────────────────────────────────────────
@@ -508,6 +589,8 @@ def run_cell_design(
     target_rho: float | None = None,
     weights: jnp.ndarray | None = None,
     weight_rho: float = 1.0,
+    weight_conn: float = 10.0,
+    conn_steps: int = 100,
     n_iters: int = 100,
     lr: float = 1e-3,
     lr_end: float | None = None,
@@ -536,6 +619,8 @@ def run_cell_design(
     opt_state_init  : AdamState for warm restart; None → fresh
     step_callback   : optional callable(step, loss, flat4, rho, theta, opt_state)
     tol             : early-stop threshold on max relative error (default 0.001)
+    weight_conn     : weight for gate-to-gate connectivity loss (default 10.0); 0 → disabled
+    conn_steps      : flood iterations for connectivity loss (default 100; ≥ grid diameter)
     """
     if weights is None:
         weights = jnp.ones(4) * 0.25
@@ -547,28 +632,36 @@ def run_cell_design(
     theta = jax.tree.map(jnp.copy, theta_init)
     opt_state = opt_state_init if opt_state_init is not None else adam_init(theta)
 
+    use_conn = weight_conn > 0.0
+
     def _loss_with_aux(t):
         canvas = neural_field.decode_canvas(t)
         flat4 = compute_flat4(canvas, setup)
         rho = compute_rho_eff(canvas, setup)
+        conn = (gate_connectivity_loss(canvas, n_steps=conn_steps)
+                if use_conn else jnp.zeros(()))
         L = flat4_loss(flat4, target, weights)
         if use_rho:
             rel_rho = (rho - t_rho) / (jnp.abs(t_rho) + 1e-30)
             L = L + weight_rho * rel_rho ** 2
-        return L, (flat4, rho)
+        if use_conn:
+            L = L + weight_conn * conn
+        return L, (flat4, rho, conn)
 
     loss_and_grad = jax.value_and_grad(_loss_with_aux, has_aux=True)
 
     loss_history: list[float] = []
     flat4_history: list[list[float]] = []
     rho_history: list[float] = []
+    conn_history: list[float] = []
     best_loss = float("inf")
     best_theta = jax.tree.map(jnp.copy, theta)
 
     target_str = "[" + ", ".join(f"{float(v):.3e}" for v in target) + "]"
     rho_str = f"  rho_target={t_rho:.1f}" if use_rho else ""
     print(f"  Cell inverse design | target flat4 = {target_str}{rho_str}")
-    print(f"  weights = {[float(w) for w in weights]}  weight_rho={weight_rho}  iters={n_iters}  lr={lr}")
+    conn_str = f"  weight_conn={weight_conn}  conn_steps={conn_steps}" if use_conn else ""
+    print(f"  weights = {[float(w) for w in weights]}  weight_rho={weight_rho}{conn_str}  iters={n_iters}  lr={lr}")
 
     for step in range(n_iters):
         t_frac = step / max(n_iters - 1, 1)
@@ -579,24 +672,28 @@ def run_cell_design(
         else:
             cur_lr = lr + (lr_end - lr) * t_frac
 
-        (loss_val, (flat4, rho)), grads = loss_and_grad(theta)
+        (loss_val, (flat4, rho, conn)), grads = loss_and_grad(theta)
         loss_float = float(loss_val)
         flat4_list = [float(v) for v in flat4]
         rho_float = float(rho)
+        conn_float = float(conn)
 
         loss_history.append(loss_float)
         flat4_history.append(flat4_list)
         rho_history.append(rho_float)
+        conn_history.append(conn_float)
 
         grad_norm = float(
             jnp.sqrt(sum(jnp.sum(l["W"] ** 2) + jnp.sum(l["b"] ** 2) for l in grads))
         )
         flat4_str = "[" + ", ".join(f"{v:.3e}" for v in flat4_list) + "]"
         rho_print = f"  rho={rho_float:.1f}" if use_rho else ""
+        conn_print = f"  conn={conn_float:.3f}" if use_conn else ""
         print(
             f"  Step {step:4d} | loss={loss_float:.4e}"
             f"  flat4={flat4_str}"
             f"{rho_print}"
+            f"{conn_print}"
             f"  lr={cur_lr:.2e}  |grad|={grad_norm:.3e}"
         )
 
@@ -628,6 +725,7 @@ def run_cell_design(
         loss_history=loss_history,
         flat4_history=flat4_history,
         rho_history=rho_history,
+        conn_history=conn_history,
     )
 
 
