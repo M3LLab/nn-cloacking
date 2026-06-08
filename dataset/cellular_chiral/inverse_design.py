@@ -154,26 +154,37 @@ class CellNeuralField:
     N: int = _QUADRANT_N
     initial_quadrant: jnp.ndarray | None = None
 
-    def decode_quadrant(self, theta: list[dict]) -> jnp.ndarray:
+    def decode_quadrant(self, theta: list[dict], beta: float = 1.0) -> jnp.ndarray:
         """theta → soft (N, N) quadrant with CA borders clamped.
 
-        With ``initial_quadrant``: occ = sigmoid(logit(initial) + mlp_out).
-        Without              : occ = sigmoid(mlp_out).
+        With ``initial_quadrant``: occ = sigmoid(beta * (logit(initial) + mlp_out)).
+        Without              : occ = sigmoid(beta * mlp_out).
+
+        ``beta`` is the Heaviside-projection sharpness.  beta=1 is a plain
+        sigmoid (smooth, gray-friendly); ramping beta upward during
+        optimization (continuation) squashes the logits so sub-threshold
+        pixels collapse to 0 and super-threshold pixels to 1, driving the
+        field toward a binary design.  The threshold sits at logit 0, which is
+        beta-invariant, so ``binarize`` is unaffected by beta.
         """
         raw = mlp_forward(theta, self.features)[:, 0].reshape(self.N, self.N)
         if self.initial_quadrant is not None:
             logit_init = jnp.log(self.initial_quadrant / (1.0 - self.initial_quadrant))
-            occ = jax.nn.sigmoid(logit_init + raw)
+            occ = jax.nn.sigmoid(beta * (logit_init + raw))
         else:
-            occ = jax.nn.sigmoid(raw)
+            occ = jax.nn.sigmoid(beta * raw)
         return jnp.where(self.interior_mask, occ, self.border_vals)
 
-    def decode_canvas(self, theta: list[dict]) -> jnp.ndarray:
+    def decode_canvas(self, theta: list[dict], beta: float = 1.0) -> jnp.ndarray:
         """theta → soft (2N, 2N) canvas via squared assembly."""
-        return assemble_squared(self.decode_quadrant(theta))
+        return assemble_squared(self.decode_quadrant(theta, beta))
 
     def binarize(self, theta: list[dict], threshold: float = 0.5) -> np.ndarray:
-        """Decode and threshold to a hard {0, 1} (2N, 2N) uint8 canvas."""
+        """Decode and threshold to a hard {0, 1} (2N, 2N) uint8 canvas.
+
+        Independent of beta: thresholding the sigmoid at 0.5 is equivalent to
+        thresholding the logit at 0 for any beta > 0.
+        """
         canvas = np.asarray(self.decode_canvas(theta))
         return (canvas > threshold).astype(np.uint8)
 
@@ -345,7 +356,7 @@ def _qp_to_pixel(
 def build_homog_setup(
     canvas_N: int = 50,
     f_star: float = 0.0,
-    simp_p: float = 1.0,
+    simp_p: float = 3.0,
     E_solid: float = E_CEMENT,
     E_void_ratio: float = 1e-6,
     rho_solid: float = RHO_CEMENT,
@@ -636,6 +647,10 @@ def run_cell_design(
     lr: float = 1e-3,
     lr_end: float | None = None,
     lr_schedule: str = "cosine",
+    beta_init: float = 1.0,
+    beta_final: float = 16.0,
+    beta_warmup_frac: float = 0.3,
+    beta_ramp_frac: float = 0.5,
     opt_state_init: AdamState | None = None,
     step_callback=None,
     tol: float = 0.001,
@@ -662,6 +677,15 @@ def run_cell_design(
     tol             : early-stop threshold on max relative error (default 0.001)
     weight_conn     : weight for gate-to-gate connectivity loss (default 10.0); 0 → disabled
     conn_steps      : flood iterations for connectivity loss (default 100; ≥ grid diameter)
+    beta_init       : initial Heaviside-projection sharpness (1.0 = plain sigmoid)
+    beta_final      : final projection sharpness; higher → harder binary field
+    beta_warmup_frac: fraction of iters held at ``beta_init`` before ramping,
+                      so the geometry can form on a smooth landscape first
+    beta_ramp_frac  : fraction of iters spent linearly ramping beta_init→beta_final;
+                      the remaining tail is held at ``beta_final`` (hardened phase).
+                      ``best_theta`` and early stopping are restricted to this
+                      hardened tail so we never lock onto a gray "cheating"
+                      solution that wouldn't survive binarization.
     """
     if weights is None:
         weights = jnp.ones(4) * 0.25
@@ -675,8 +699,8 @@ def run_cell_design(
 
     use_conn = weight_conn > 0.0
 
-    def _loss_with_aux(t):
-        canvas = neural_field.decode_canvas(t)
+    def _loss_with_aux(t, beta):
+        canvas = neural_field.decode_canvas(t, beta)
         flat4 = compute_flat4(canvas, setup)
         rho = compute_rho_eff(canvas, setup)
         conn = (gate_connectivity_loss(canvas, n_steps=conn_steps)
@@ -689,7 +713,21 @@ def run_cell_design(
             L = L + weight_conn * conn
         return L, (flat4, rho, conn)
 
+    # grad only w.r.t. theta (argnums=0); beta is a fixed schedule value per step.
     loss_and_grad = jax.value_and_grad(_loss_with_aux, has_aux=True)
+
+    def _beta_at(t_frac: float) -> tuple[float, bool]:
+        """Return (beta, hardened) for the given progress fraction in [0, 1].
+
+        hardened is True once beta has reached beta_final (the held tail), the
+        only phase where the soft field is ~binary and metrics are trustworthy.
+        """
+        if t_frac < beta_warmup_frac:
+            return beta_init, False
+        r = (t_frac - beta_warmup_frac) / max(beta_ramp_frac, 1e-12)
+        if r >= 1.0:
+            return beta_final, True
+        return beta_init + (beta_final - beta_init) * r, False
 
     loss_history: list[float] = []
     flat4_history: list[list[float]] = []
@@ -703,6 +741,7 @@ def run_cell_design(
     print(f"  Cell inverse design | target flat4 = {target_str}{rho_str}")
     conn_str = f"  weight_conn={weight_conn}  conn_steps={conn_steps}" if use_conn else ""
     print(f"  weights = {[float(w) for w in weights]}  weight_rho={weight_rho}{conn_str}  iters={n_iters}  lr={lr}")
+    print(f"  beta {beta_init}→{beta_final}  (warmup {beta_warmup_frac:.0%}, ramp {beta_ramp_frac:.0%}, hold tail)  simp_p={setup.simp_p}")
 
     for step in range(n_iters):
         t_frac = step / max(n_iters - 1, 1)
@@ -713,7 +752,12 @@ def run_cell_design(
         else:
             cur_lr = lr + (lr_end - lr) * t_frac
 
-        (loss_val, (flat4, rho, conn)), grads = loss_and_grad(theta)
+        cur_beta, hardened = _beta_at(t_frac)
+        # Always treat the final step as hardened so best_theta is set even if
+        # the schedule leaves no explicit held tail (e.g. ramp_frac too large).
+        hardened = hardened or (step == n_iters - 1)
+
+        (loss_val, (flat4, rho, conn)), grads = loss_and_grad(theta, cur_beta)
         loss_float = float(loss_val)
         flat4_list = [float(v) for v in flat4]
         rho_float = float(rho)
@@ -730,15 +774,19 @@ def run_cell_design(
         flat4_str = "[" + ", ".join(f"{v:.3e}" for v in flat4_list) + "]"
         rho_print = f"  rho={rho_float:.1f}" if use_rho else ""
         conn_print = f"  conn={conn_float:.3f}" if use_conn else ""
+        hard_tag = "*" if hardened else " "
         print(
-            f"  Step {step:4d} | loss={loss_float:.4e}"
+            f"  Step {step:4d}{hard_tag}| loss={loss_float:.4e}"
             f"  flat4={flat4_str}"
             f"{rho_print}"
             f"{conn_print}"
-            f"  lr={cur_lr:.2e}  |grad|={grad_norm:.3e}"
+            f"  beta={cur_beta:.1f}  lr={cur_lr:.2e}  |grad|={grad_norm:.3e}"
         )
 
-        if loss_float < best_loss:
+        # Only commit best / stop in the hardened tail, where the soft field is
+        # ~binary; a lower loss during the gray phase is not a trustworthy
+        # binary design.
+        if hardened and loss_float < best_loss:
             best_loss = loss_float
             best_theta = jax.tree.map(jnp.copy, theta)
 
@@ -752,7 +800,7 @@ def run_cell_design(
         if use_rho:
             rel_err_rho = abs((rho_float - t_rho) / (abs(t_rho) + 1e-30))
             max_rel_err = max(max_rel_err, rel_err_rho)
-        if max_rel_err < tol:
+        if hardened and max_rel_err < tol:
             print(f"  Early stop at step {step}: max rel err {max_rel_err:.2e} < tol {tol:.2e}")
             break
 

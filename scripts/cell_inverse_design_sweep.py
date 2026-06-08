@@ -315,12 +315,20 @@ def design_one_cell(
     elapsed = time.perf_counter() - t0
     print(f"  Completed {len(result.loss_history)} steps in {elapsed:.1f}s")
 
-    # Evaluate best weights
-    canvas_soft = nf.decode_canvas(result.best_theta)
+    # Evaluate best weights.  The deliverable is the BINARIZED canvas, so the
+    # reported prediction is computed on it (simp_p is irrelevant for a {0,1}
+    # field).  The hardened soft canvas (beta=beta_final) is kept only as a
+    # diagnostic; its gap to the binary prediction tells us how well the
+    # beta-projection actually drove the field to binary.
+    canvas_soft = nf.decode_canvas(result.best_theta, beta=16.0)
     canvas_bin = nf.binarize(result.best_theta)
-    canvas_jnp = jnp.asarray(canvas_soft)
-    pred_flat4 = np.asarray(compute_flat4(canvas_jnp, setup))
-    pred_rho = float(compute_rho_eff(canvas_jnp, setup))
+    canvas_bin_jnp = jnp.asarray(canvas_bin, dtype=jnp.float32)
+    pred_flat4 = np.asarray(compute_flat4(canvas_bin_jnp, setup))
+    pred_rho = float(compute_rho_eff(canvas_bin_jnp, setup))
+
+    soft_flat4 = np.asarray(compute_flat4(jnp.asarray(canvas_soft), setup))
+    soft_gap = np.abs((pred_flat4 - soft_flat4) / (np.abs(soft_flat4) + 1e-30))
+    print(f"  soft→binary flat4 gap (max rel): {soft_gap.max():.2%}")
 
     # Save arrays
     np.save(str(canvas_path), canvas_bin)
@@ -429,9 +437,11 @@ def main() -> None:
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--weight-rho", type=float, default=100.0)
-    parser.add_argument("--simp-p", type=float, default=1.0,
-                        help="SIMP exponent (default 1 = linear; p>1 kills gradients at void)")
+    parser.add_argument("--weight-rho", type=float, default=10.0)
+    parser.add_argument("--simp-p", type=float, default=3.0,
+                        help="SIMP exponent (default 3; penalizes gray during the soft phase "
+                             "so the target stays binary-reachable. Inert once beta-projection "
+                             "has driven the field to {0,1}.)")
     parser.add_argument("--resume", action="store_true",
                         help="Skip cells whose output already contains canvas.npy")
     parser.add_argument("--dataset-path", type=Path,
