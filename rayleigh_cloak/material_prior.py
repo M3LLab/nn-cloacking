@@ -3,7 +3,10 @@
 Loads a Gaussian-mixture .npz produced by ``dataset.cellular_chiral.fit_gmm``
 and provides a JAX-traceable flat-top penalty:
 
-    penalty(C, rho) = mean over cloak cells of  max(0, threshold - log p(λ, μ, ρ))
+    penalty(C, rho) = mean over cloak cells of  max(0, threshold - log p(features))
+
+where the feature vector is (λ, μ, ρ) for the ``lame`` prior (n_C_params=2) or
+(C₁₁₁₁, C₂₂₂₂, C₁₂₁₂, C₁₁₂₂, ρ) for the ``flat4`` prior (n_C_params=4).
 
 The penalty is zero whenever the cell sits comfortably inside the dataset's
 density support (log p ≥ threshold) and grows linearly as the cell drifts
@@ -29,14 +32,22 @@ class GMMPrior:
     (i.e. inverse covariance) is stored directly — it's what sklearn already
     computes during fit, and it lets us evaluate log-prob without an inverse.
 
+    The feature dimension ``D`` depends on the cell representation the prior was
+    fit for: ``D=3`` for the ``lame`` set (λ, μ, ρ; ``n_C_params=2``) and
+    ``D=5`` for the ``flat4`` set (C₁₁₁₁, C₂₂₂₂, C₁₂₁₂, C₁₁₂₂, ρ;
+    ``n_C_params=4``). ``n_C_params`` and ``feature_order`` are static Python
+    objects (not device arrays) so they can guard against a prior/cell mismatch.
+
     Attributes
     ----------
     weights              : (K,)              mixture weights
-    means                : (K, 3)            in standardised (λ, μ, ρ) space
-    precisions_cholesky  : (K, 3, 3)         Cholesky of inverse covariance
-    feature_mean         : (3,)              standardisation mean (raw → std)
-    feature_std          : (3,)              standardisation std
+    means                : (K, D)            in standardised feature space
+    precisions_cholesky  : (K, D, D)         Cholesky of inverse covariance
+    feature_mean         : (D,)              standardisation mean (raw → std)
+    feature_std          : (D,)              standardisation std
     threshold            : scalar            flat-top threshold τ
+    n_C_params           : int               cell representation this prior fits
+    feature_order        : tuple[str, ...]   feature names, in column order
     """
     weights: jnp.ndarray
     means: jnp.ndarray
@@ -44,6 +55,8 @@ class GMMPrior:
     feature_mean: jnp.ndarray
     feature_std: jnp.ndarray
     threshold: jnp.ndarray
+    n_C_params: int
+    feature_order: tuple[str, ...]
 
 
 # Positions of dataset log-p quantiles saved by ``fit_gmm.py`` in
@@ -84,6 +97,18 @@ def load_gmm_prior(
         tau = float(np.interp(
             quantile, _LOG_P_QUANTILE_POSITIONS, np.asarray(data["log_p_quantiles"]),
         ))
+    feature_order = tuple(str(s) for s in np.asarray(data["feature_order"]))
+    # ``n_C_params`` was added alongside the flat4 feature set; older .npz files
+    # (λ, μ, ρ) predate it, so fall back to the isotropic flat2 representation.
+    if "n_C_params" in data.files:
+        n_C_params = int(data["n_C_params"])
+    elif feature_order == ("lambda", "mu", "rho"):
+        n_C_params = 2
+    else:
+        raise ValueError(
+            f"{path}: missing 'n_C_params' and unrecognised feature_order "
+            f"{feature_order}; refit with the current fit_gmm.py."
+        )
     return GMMPrior(
         weights=jnp.asarray(data["weights"], dtype=dtype),
         means=jnp.asarray(data["means"], dtype=dtype),
@@ -91,6 +116,8 @@ def load_gmm_prior(
         feature_mean=jnp.asarray(data["feature_mean"], dtype=dtype),
         feature_std=jnp.asarray(data["feature_std"], dtype=dtype),
         threshold=jnp.asarray(tau, dtype=dtype),
+        n_C_params=n_C_params,
+        feature_order=feature_order,
     )
 
 
@@ -122,25 +149,19 @@ def _gmm_log_prob_standardised(x_std: jnp.ndarray, prior: GMMPrior) -> jnp.ndarr
     return jax.scipy.special.logsumexp(log_w + log_per_k, axis=-1)  # (...)
 
 
-def _flat_to_lame(cell_C_flat: jnp.ndarray, n_C_params: int) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Extract (λ, μ) per cell from the cell_C_flat array.
+def _cell_features(cell_C_flat: jnp.ndarray, cell_rho: jnp.ndarray) -> jnp.ndarray:
+    """Stack per-cell stiffness and density into the GMM feature matrix.
 
-    For ``n_C_params=2`` the flat layout is already [λ, μ]. For other
-    parameterisations we go through the (2,2,2,2) tensor representation
-    and read λ = C[0,0,1,1], μ = C[0,1,0,1] — the same indices used by
-    ``materials.C_to_flat2``.
+    The flat stiffness layout already matches the GMM's stiffness column order,
+    so the features are simply ``[*cell_C_flat, rho]``:
+
+      * ``n_C_params == 2`` (lame, D=3): [λ, μ, ρ] — flat2 is [λ, μ].
+      * ``n_C_params == 4`` (flat4, D=5): [C₁₁₁₁, C₂₂₂₂, C₁₂₁₂, C₁₁₂₂, ρ] —
+        flat4 is [C₁₁₁₁, C₂₂₂₂, C₁₂₁₂, C₁₁₂₂] (see ``materials.C_to_flatC``).
+
+    Returns ``(n_cells, n_C_params + 1)`` in raw (un-standardised) space.
     """
-    if n_C_params == 2:
-        return cell_C_flat[..., 0], cell_C_flat[..., 1]
-
-    # Lazy import to keep this module light when only the GMM bits are used.
-    from rayleigh_cloak.materials import _get_converters
-
-    _, from_flat = _get_converters(n_C_params)
-    cell_C_full = jax.vmap(from_flat)(cell_C_flat)        # (n_cells, 2,2,2,2)
-    lam = cell_C_full[..., 0, 0, 1, 1]
-    mu = cell_C_full[..., 0, 1, 0, 1]
-    return lam, mu
+    return jnp.concatenate([cell_C_flat, cell_rho[..., None]], axis=-1)
 
 
 def gmm_flat_top_penalty(
@@ -163,9 +184,29 @@ def gmm_flat_top_penalty(
     Returns
     -------
     scalar JAX value — the regularisation term to be multiplied by ``weight``.
+
+    Raises
+    ------
+    ValueError
+        If the prior's cell representation (``prior.n_C_params``) does not match
+        the ``n_C_params`` of the cells being optimised, or if the prior's
+        feature dimension is not ``n_C_params + 1`` (stiffness columns + ρ).
     """
-    lam, mu = _flat_to_lame(cell_C_flat, n_C_params)
-    feat = jnp.stack([lam, mu, cell_rho], axis=-1)        # (n_cells, 3)
+    if prior.n_C_params != n_C_params:
+        raise ValueError(
+            f"material prior was fit for n_C_params={prior.n_C_params} "
+            f"(features {list(prior.feature_order)}) but the cells use "
+            f"n_C_params={n_C_params}. Refit the GMM with the matching "
+            f"--feature-set, or point the config at the right prior .npz."
+        )
+    prior_dim = int(prior.means.shape[-1])
+    if prior_dim != n_C_params + 1:
+        raise ValueError(
+            f"material prior feature dim ({prior_dim}) must equal "
+            f"n_C_params + 1 = {n_C_params + 1} (stiffness columns + rho); "
+            f"feature_order={list(prior.feature_order)}."
+        )
+    feat = _cell_features(cell_C_flat, cell_rho)           # (n_cells, D)
     feat_std = (feat - prior.feature_mean) / prior.feature_std
     log_p = _gmm_log_prob_standardised(feat_std, prior)   # (n_cells,)
     pen = jnp.maximum(0.0, prior.threshold - log_p)       # flat-top

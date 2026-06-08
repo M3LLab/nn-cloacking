@@ -74,17 +74,16 @@ _FLAT4_LABELS = ["C11", "C22", "C12", "C66"]
 @dataclass
 class DatasetCache:
     """Pre-loaded dataset features for fast nearest-neighbour lookup."""
-    Xs: np.ndarray    # (n, 5) standardised [C11, C22, C12, C66, rho]
-    mean: np.ndarray  # (5,)
-    std: np.ndarray   # (5,)
+    X: np.ndarray     # (n, 5) raw [C11, C22, C12, C66, rho]
     h5_path: Path
     n: int
 
 
 def load_dataset_for_matching(h5_path: Path) -> DatasetCache:
-    """Load scalar features from stiffness.h5 and standardise.
+    """Load scalar features from stiffness.h5.
 
-    Features: [C11, C22, C12, C66, rho] — the same quantities we optimise.
+    Features: [C11, C22, C12, C66, rho] — the same quantities we optimise,
+    kept raw (the NN metric is relative, applied per query).
     """
     print(f"Loading dataset features from {h5_path} ...")
     with h5py.File(str(h5_path), "r") as f:
@@ -94,11 +93,8 @@ def load_dataset_for_matching(h5_path: Path) -> DatasetCache:
         C66 = f["C66"][:]
         rho = f["rho"][:]
     X = np.column_stack([C11, C22, C12, C66, rho]).astype(np.float64)
-    mean = X.mean(axis=0)
-    std  = X.std(axis=0) + 1e-30
-    Xs   = (X - mean) / std
     print(f"  {len(C11)} dataset cells loaded.")
-    return DatasetCache(Xs=Xs, mean=mean, std=std, h5_path=h5_path, n=len(C11))
+    return DatasetCache(X=X, h5_path=h5_path, n=len(C11))
 
 
 def find_nn_quadrant(
@@ -113,25 +109,23 @@ def find_nn_quadrant(
     the dataset-stored values for the matched cell (computed with dataset FEM
     settings, which may differ from the inverse-design FEM settings).
 
-    Matching is done in standardised [C11, C22, C12, C66, rho] space.
-    ``rho_weight`` rescales the rho column (>1 → more rho-sensitive).
+    Matching uses a RELATIVE metric — sum_j w_j ((X_j - q_j)/|q_j|)^2 over
+    [C11, C22, C12, C66, rho] — mirroring the inverse-design loss.  A global
+    z-score metric is wrong here: the dataset std is dominated by stiff cells
+    (~1e9), so soft-region (~1e8) stiffness differences become negligible and
+    C22/C66 silently drop out of the match.  ``rho_weight`` rescales the rho
+    term (>1 → more rho-sensitive).
     """
     q = np.array([target_flat4[0], target_flat4[1],
                   target_flat4[2], target_flat4[3], float(target_rho)],
                  dtype=np.float64)
-    q_std = (q - ds.mean) / ds.std
 
     weights = np.array([1.0, 1.0, 1.0, 1.0, rho_weight])
-    Xs_w  = ds.Xs  * weights[None, :]
-    q_w   = q_std  * weights
-
-    # Brute-force L2 (n_ds × 5 — fast enough for 156k)
-    diff = Xs_w - q_w[None, :]
-    d2   = np.einsum("ij,ij->i", diff, diff)
+    rel = (ds.X - q[None, :]) / (np.abs(q)[None, :] + 1e-30)   # relative error
+    d2  = np.sum(rel ** 2 * weights[None, :], axis=1)
     nn_idx = int(np.argmin(d2))
 
-    # Recover un-standardised NN parameters
-    nn_params = ds.Xs[nn_idx] * ds.std + ds.mean   # [C11, C22, C12, C66, rho]
+    nn_params = ds.X[nn_idx]                       # [C11, C22, C12, C66, rho]
     nn_flat4 = nn_params[:4].astype(np.float64)
     nn_rho   = float(nn_params[4])
 

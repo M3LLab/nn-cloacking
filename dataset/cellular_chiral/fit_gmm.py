@@ -1,22 +1,33 @@
-"""Fit a Gaussian Mixture Model on (lambda, mu, rho) from a stiffness HDF5.
+"""Fit a Gaussian Mixture Model on per-cell material features from a stiffness HDF5.
 
 Saves a portable .npz that the optimisation loop can load on any machine to
 apply a flat-top dataset-prior penalty: ``max(0, threshold - log p(C, rho))``.
 
-The .npz contains:
+Two feature sets are supported, selected with ``--feature-set``:
+
+  * ``lame``  (default, D=3) → (λ, μ, ρ), matching the ``n_C_params=2`` (flat2)
+    isotropic cell parameterisation.
+  * ``flat4`` (D=5) → (C₁₁₁₁, C₂₂₂₂, C₁₂₁₂, C₁₁₂₂, ρ), matching the
+    ``n_C_params=4`` (flat4) cell parameterisation. The four stiffness features
+    are read from the dataset's orthotropic Voigt components
+    (C11, C22, C66, C12) in exactly the flat4 column order.
+
+The .npz contains (D = 3 for ``lame``, 5 for ``flat4``):
     weights              (K,)            mixture weights
-    means                (K, 3)          means in standardised (λ, μ, ρ) space
-    covariances          (K, 3, 3)       full covariances (standardised space)
-    precisions_cholesky  (K, 3, 3)       lower-triangular Cholesky of precision
+    means                (K, D)          means in standardised feature space
+    covariances          (K, D, D)       full covariances (standardised space)
+    precisions_cholesky  (K, D, D)       lower-triangular Cholesky of precision
                                          (sklearn convention; lets the JAX
                                          log-prob skip an inverse)
-    feature_mean         (3,)            standardisation mean (raw → std)
-    feature_std          (3,)            standardisation std
+    feature_mean         (D,)            standardisation mean (raw → std)
+    feature_std          (D,)            standardisation std
     threshold            scalar          τ used in the flat-top penalty
     threshold_percentile scalar          quantile of dataset log p chosen as τ
     n_components         int             K
     n_samples            int             dataset size used for the fit
-    feature_order        ['lambda','mu','rho']
+    feature_order        (D,) str        feature names, in order
+    n_C_params           int             cell representation this prior matches
+                                         (2 for ``lame``, 4 for ``flat4``)
     bic                  scalar          for K-selection sanity
     log_p_quantiles      (5,)            (q1, q5, q25, q50, q75) of dataset log p
 
@@ -27,6 +38,11 @@ Usage
         -o output/ca_bulk_squared/gmm_lambda_mu_rho.npz \
         -K 16 \
         --threshold-percentile 0.25
+
+    python -m dataset.cellular_chiral.fit_gmm \
+        -i output/ca_bulk_squared/stiffness.h5 \
+        -o output/ca_bulk_squared/gmm_flat4.npz \
+        --feature-set flat4 -K 16 --threshold-percentile 0.25
 """
 from __future__ import annotations
 
@@ -42,6 +58,27 @@ from sklearn.mixture import GaussianMixture
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 
+# Feature-set definitions. Each maps to:
+#   datasets     : HDF5 dataset names to stack as the raw feature columns
+#   feature_order: human-readable names (saved to the .npz, in column order)
+#   n_C_params   : the cell representation this prior is valid against
+# For ``flat4`` the dataset's orthotropic Voigt components map to the flat4
+# tensor columns [C1111, C2222, C1212, C1122] as: C11→C1111, C22→C2222,
+# C66→C1212 (shear), C12→C1122 (normal coupling).
+_FEATURE_SETS = {
+    "lame": {
+        "datasets": ["lambda_", "mu", "rho"],
+        "feature_order": ["lambda", "mu", "rho"],
+        "n_C_params": 2,
+    },
+    "flat4": {
+        "datasets": ["C11", "C22", "C66", "C12", "rho"],
+        "feature_order": ["C1111", "C2222", "C1212", "C1122", "rho"],
+        "n_C_params": 4,
+    },
+}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -52,6 +89,11 @@ def main() -> None:
     ap.add_argument("-o", "--output", type=Path,
                     default=Path("output/ca_bulk_squared/gmm_lambda_mu_rho.npz"),
                     help="Where to save the fitted GMM artifact")
+    ap.add_argument("--feature-set", default="lame", choices=list(_FEATURE_SETS),
+                    help="Which per-cell features to fit the GMM on. "
+                         "'lame' (D=3, λ/μ/ρ) matches n_C_params=2; "
+                         "'flat4' (D=5, C1111/C2222/C1212/C1122/ρ) matches "
+                         "n_C_params=4.")
     ap.add_argument("-K", "--n-components", type=int, default=16,
                     help="Number of GMM mixture components")
     ap.add_argument("--covariance-type", default="full",
@@ -72,14 +114,20 @@ def main() -> None:
     if not args.input.exists():
         raise SystemExit(f"missing input: {args.input}")
 
+    fset = _FEATURE_SETS[args.feature_set]
     with h5py.File(args.input, "r") as f:
-        lam = f["lambda_"][:]
-        mu = f["mu"][:]
-        rho = f["rho"][:]
-    n = lam.size
-    print(f"loaded {n} samples from {args.input}")
+        missing = [d for d in fset["datasets"] if d not in f]
+        if missing:
+            raise SystemExit(
+                f"feature-set {args.feature_set!r} needs datasets {missing} "
+                f"which are absent from {args.input}"
+            )
+        cols = [f[d][:] for d in fset["datasets"]]
+    n = cols[0].size
+    print(f"loaded {n} samples from {args.input} "
+          f"(feature-set={args.feature_set}, features={fset['feature_order']})")
 
-    X = np.column_stack([lam, mu, rho]).astype(np.float64)
+    X = np.column_stack(cols).astype(np.float64)
     feature_mean = X.mean(axis=0)
     feature_std = X.std(axis=0)
     Xs = (X - feature_mean) / feature_std
@@ -130,7 +178,8 @@ def main() -> None:
         threshold_percentile=np.float64(args.threshold_percentile),
         n_components=np.int64(args.n_components),
         n_samples=np.int64(n),
-        feature_order=np.array(["lambda", "mu", "rho"]),
+        feature_order=np.array(fset["feature_order"]),
+        n_C_params=np.int64(fset["n_C_params"]),
         bic=np.float64(bic),
         log_p_quantiles=quantiles.astype(np.float64),
         covariance_type=np.array(args.covariance_type),

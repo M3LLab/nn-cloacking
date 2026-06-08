@@ -399,14 +399,31 @@ class CellMaterial:
                 )
             data = np.load(str(self.init_path), allow_pickle=True)
             order = [str(s) for s in np.asarray(data["feature_order"])]
-            if order != ["lambda", "mu", "rho"]:
+            feat_mean = np.asarray(data["feature_mean"], dtype=float)
+            if order == ["lambda", "mu", "rho"]:
+                if self.n_C_params != 2:
+                    raise ValueError(
+                        f"init_path {self.init_path} is a lame (λ, μ, ρ) prior "
+                        f"but cells use n_C_params={self.n_C_params}; expected 2."
+                    )
+                lam_c, mu_c, rho_c = (float(v) for v in feat_mean)
+                cloak_C_flat = self.to_flat(C_iso(lam_c, mu_c))
+                cloak_rho = rho_c
+            elif order == ["C1111", "C2222", "C1212", "C1122", "rho"]:
+                if self.n_C_params != 4:
+                    raise ValueError(
+                        f"init_path {self.init_path} is a flat4 prior but cells "
+                        f"use n_C_params={self.n_C_params}; expected 4."
+                    )
+                # The four stiffness means are already in flat4 column order.
+                cloak_C_flat = jnp.asarray(feat_mean[:4])
+                cloak_rho = float(feat_mean[4])
+            else:
                 raise ValueError(
                     f"unexpected feature_order in {self.init_path}: {order}; "
-                    "expected ['lambda', 'mu', 'rho']"
+                    "expected ['lambda', 'mu', 'rho'] or "
+                    "['C1111', 'C2222', 'C1212', 'C1122', 'rho']"
                 )
-            lam_c, mu_c, rho_c = (float(v) for v in np.asarray(data["feature_mean"]))
-            cloak_C_flat = self.to_flat(C_iso(lam_c, mu_c))
-            cloak_rho = rho_c
         elif self.init == "homogeneous":
             cloak_C_flat = C0_flat
             cloak_rho = self.rho0

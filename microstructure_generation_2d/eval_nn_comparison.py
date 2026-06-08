@@ -4,8 +4,13 @@ validation set.
 For every val sample the script:
   1. Generates one diffusion sample conditioned on (C11, C22, C12, C66, vol).
   2. Runs FEM to get its realised stiffness.
-  3. Finds the nearest neighbour in the training set (L2 in z-scored feature
-     space: scaled C11/C22/C12/C66 + z-scored vol).
+  3. Finds the nearest neighbour in the training set using a RELATIVE metric:
+     sum_j ((train_j - target_j) / |target_j|)^2 over [C11, C22, C12, C66, vol].
+     This is the same per-component relative error the inverse-design loss
+     minimises.  A global z-score metric is wrong here: the dataset is
+     dominated by stiff cells (C up to ~1e10), so its std is ~1e9, which makes
+     stiffness differences in the soft query region (~1e8) look negligible and
+     silently drops C22/C66 from the match.
   4. Saves a side-by-side PNG: [Val target | Generated | Nearest neighbour].
 
 Outputs
@@ -90,32 +95,14 @@ def _run_fem(cell_uint8: np.ndarray) -> tuple[float, float, float, float, float]
     return float(C11), float(C22), float(C12), float(C66), float(vf)
 
 
-def _scale_features(
-    C11: np.ndarray,
-    C22: np.ndarray,
-    C12: np.ndarray,
-    C66: np.ndarray,
-    vol: np.ndarray,
-    sc11, sc22, sc12, sc66,
-) -> np.ndarray:
-    """Return (N, 5) array with all features z-scored."""
-    s11 = sc11.transform(C11.reshape(-1, 1)).ravel()
-    s22 = sc22.transform(C22.reshape(-1, 1)).ravel()
-    s12 = sc12.transform(C12.reshape(-1, 1)).ravel()
-    s66 = sc66.transform(C66.reshape(-1, 1)).ravel()
-    sv  = (vol - VOL_MEAN) / VOL_STD
-    return np.column_stack([s11, s22, s12, s66, sv]).astype(np.float32)
-
-
 def _load_train_features(
     h5_path: str,
     train_indices: list[int],
-    sc11, sc22, sc12, sc66,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Load and scale training-set stiffness features.
+    """Load raw training-set stiffness features (no scaling).
 
-    Returns (features (N,5), C11, C22, C12, C66, vol) for all train indices,
-    in the same order as train_indices.
+    Returns (train_raw (N,5) = [C11,C22,C12,C66,vol], C11, C22, C12, C66, vol)
+    for all train indices, in the same order as train_indices.
     """
     idx = np.asarray(train_indices, dtype=np.int64)
     sort_ord = np.argsort(idx)
@@ -135,14 +122,24 @@ def _load_train_features(
     C66 = C66_all[sorted_idx][inv_ord]
     vol = vol_all[sorted_idx][inv_ord]
 
-    feats = _scale_features(C11, C22, C12, C66, vol, sc11, sc22, sc12, sc66)
-    return feats, C11, C22, C12, C66, vol
+    train_raw = np.column_stack([C11, C22, C12, C66, vol]).astype(np.float64)
+    return train_raw, C11, C22, C12, C66, vol
 
 
-def _find_nn(query_feat: np.ndarray, train_feats: np.ndarray) -> int:
-    """Return index into train_feats of the closest row."""
-    dists = np.sum((train_feats - query_feat) ** 2, axis=1)
-    return int(np.argmin(dists))
+def _rel_dist(target_raw: np.ndarray, cand_raw: np.ndarray) -> np.ndarray:
+    """Relative L2 distance: sum_j ((cand_j - target_j)/|target_j|)^2.
+
+    ``cand_raw`` may be (5,) or (N, 5); ``target_raw`` is (5,).  Returns a
+    scalar or (N,) accordingly.
+    """
+    denom = np.abs(target_raw) + 1e-30
+    diff = (cand_raw - target_raw) / denom
+    return np.sum(diff ** 2, axis=-1)
+
+
+def _find_nn(target_raw: np.ndarray, train_raw: np.ndarray) -> int:
+    """Index of the training row closest to ``target_raw`` under relative L2."""
+    return int(np.argmin(_rel_dist(target_raw, train_raw)))
 
 
 def _load_cell(h5: h5py.File, h_idx: int) -> np.ndarray:
@@ -266,10 +263,10 @@ def main() -> None:
     print(f"Val samples : {len(val_indices)}")
     print(f"Train samples: {len(train_indices)}")
 
-    # ---- build NN feature matrix ----
+    # ---- build NN feature matrix (raw; relative metric applied per query) ----
     print("Loading train features for NN search...")
-    train_feats, tr_C11, tr_C22, tr_C12, tr_C66, tr_vol = _load_train_features(
-        args.h5, train_indices, sc11, sc22, sc12, sc66,
+    train_raw, tr_C11, tr_C22, tr_C12, tr_C66, tr_vol = _load_train_features(
+        args.h5, train_indices,
     )
     train_indices_arr = np.asarray(train_indices, dtype=np.int64)
 
@@ -319,15 +316,10 @@ def main() -> None:
                 vol,
             ], dtype=np.float32)
 
-            # -- generate (best of args.diffusion_samples) --
-            scaled_target = np.array([
-                float(sc11.transform([[c11]])[0, 0]),
-                float(sc22.transform([[c22]])[0, 0]),
-                float(sc12.transform([[c12]])[0, 0]),
-                float(sc66.transform([[c66]])[0, 0]),
-                (vol - VOL_MEAN) / VOL_STD,
-            ], dtype=np.float32)
+            # -- raw target for relative NN / selection metric --
+            target_raw = np.array([c11, c22, c12, c66, vol], dtype=np.float64)
 
+            # -- generate (best of args.diffusion_samples) --
             best_cell, best_fem, best_dist = None, None, np.inf
             for _ in range(args.diffusion_samples):
                 with torch.no_grad():
@@ -341,22 +333,15 @@ def main() -> None:
                 arr       = img.cpu().numpy().squeeze()
                 candidate = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
                 fem = _run_fem(candidate)  # (c11, c22, c12, c66, vol)
-                cand_scaled = np.array([
-                    float(sc11.transform([[fem[0]]])[0, 0]),
-                    float(sc22.transform([[fem[1]]])[0, 0]),
-                    float(sc12.transform([[fem[2]]])[0, 0]),
-                    float(sc66.transform([[fem[3]]])[0, 0]),
-                    (fem[4] - VOL_MEAN) / VOL_STD,
-                ], dtype=np.float32)
-                dist = float(np.sum((cand_scaled - scaled_target) ** 2))
+                dist = float(_rel_dist(target_raw, np.asarray(fem, dtype=np.float64)))
                 if dist < best_dist:
                     best_dist, best_cell, best_fem = dist, candidate, fem
 
             gen_cell = best_cell
             c11_gen, c22_gen, c12_gen, c66_gen, vol_gen = best_fem
 
-            # -- nearest neighbour --
-            nn_pos     = _find_nn(scaled_target, train_feats)
+            # -- nearest neighbour (relative metric over raw features) --
+            nn_pos     = _find_nn(target_raw, train_raw)
             nn_h5_idx  = int(train_indices_arr[nn_pos])
             nn_cell    = _load_cell(h5, nn_h5_idx)
             c11_nn = float(tr_C11[nn_pos])
@@ -396,8 +381,34 @@ def main() -> None:
             )
 
     csv_file.close()
+    _print_summary(csv_path)
     print(f"\nDone. Results in {csv_path}")
     print(f"Images in       {img_dir}/")
+
+
+def _print_summary(csv_path: Path) -> None:
+    """Aggregate per-component relative error for NN and diffusion from the CSV."""
+    rows = list(csv.DictReader(open(csv_path, newline="")))
+    if not rows:
+        return
+    comps = ["C11", "C22", "C12", "C66"]
+    print("\n" + "=" * 64)
+    print(f"{'component':>10} | {'NN mean':>9} {'NN med':>9} | {'gen mean':>9} {'gen med':>9}")
+    print("-" * 64)
+    for c in comps:
+        nn = np.array([_rel_err(float(r[f"{c}_dataset"]), float(r[c])) for r in rows])
+        gn = np.array([_rel_err(float(r[f"{c}_generated"]), float(r[c])) for r in rows])
+        print(f"{c:>10} | {nn.mean():9.1%} {np.median(nn):9.1%} | {gn.mean():9.1%} {np.median(gn):9.1%}")
+    volnn = np.array([abs(float(r["vol_dataset"]) - float(r["vol"])) for r in rows])
+    volgn = np.array([abs(float(r["vol_generated"]) - float(r["vol"])) for r in rows])
+    print(f"{'vol(abs)':>10} | {volnn.mean():9.3f} {np.median(volnn):9.3f} | {volgn.mean():9.3f} {np.median(volgn):9.3f}")
+    # mean over the 4 stiffness components, per sample
+    nn_all = np.mean([[_rel_err(float(r[f'{c}_dataset']), float(r[c])) for c in comps] for r in rows], axis=1)
+    gn_all = np.mean([[_rel_err(float(r[f'{c}_generated']), float(r[c])) for c in comps] for r in rows], axis=1)
+    print("-" * 64)
+    print(f"{'mean-4C':>10} | {nn_all.mean():9.1%} {np.median(nn_all):9.1%} | {gn_all.mean():9.1%} {np.median(gn_all):9.1%}")
+    print(f"n = {len(rows)}")
+    print("=" * 64)
 
 
 if __name__ == "__main__":
