@@ -343,6 +343,32 @@ def design_one_cell(
     soft_gap = np.abs((pred_flat4 - soft_flat4) / (np.abs(soft_flat4) + 1e-30))
     print(f"  soft→binary flat4 gap (max rel): {soft_gap.max():.2%}")
 
+    # ── best-of-NN guard ──────────────────────────────────────────────
+    # The optimisation can wander to a binary WORSE than the NN init (most cells
+    # are pinned at NN by saturated gradients, but a few drift worse). When an NN
+    # init is available, fall back to the NN-init binary whenever it matches the
+    # target better (avg-component rel err), so inverse design is never worse than
+    # plain NN matching.
+    def _avg_comp_err(pf, pr):
+        e4 = np.abs((pf - target_flat4) / (np.abs(target_flat4) + 1e-30))
+        er = abs((pr - target_rho) / (abs(target_rho) + 1e-30))
+        return float((e4.sum() + er) / 5.0)
+
+    if ds_cache is not None:
+        init_bin = nf.binarize(theta_init)
+        init_jnp = jnp.asarray(init_bin, dtype=jnp.float32)
+        init_flat4 = np.asarray(compute_flat4(init_jnp, setup))
+        init_rho = float(compute_rho_eff(init_jnp, setup))
+        opt_err, nn_err = _avg_comp_err(pred_flat4, pred_rho), _avg_comp_err(init_flat4, init_rho)
+        if nn_err < opt_err:
+            print(f"  best-of-NN guard: NN init better ({nn_err:.2%} < optimized {opt_err:.2%}) "
+                  f"→ keeping NN cell")
+            canvas_bin = init_bin
+            pred_flat4, pred_rho = init_flat4, init_rho
+            canvas_bin_jnp = init_jnp
+        else:
+            print(f"  best-of-NN guard: optimized better ({opt_err:.2%} ≤ NN {nn_err:.2%}) → keeping it")
+
     # Save arrays
     np.save(str(canvas_path), canvas_bin)
     np.save(str(cell_dir / "canvas_soft.npy"), np.asarray(canvas_soft))

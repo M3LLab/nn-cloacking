@@ -372,6 +372,60 @@ def build_canvas(
     return canvas, (n_x, n_y), (H, W), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag
 
 
+def build_canvas_from_cell_designs(
+    optimized_params_npz: Path,
+    dataset_h5: Path,
+    config_path: Path,
+    cell_designs_dir: Path,
+    rho_weight: float = 1.0,
+):
+    """Like ``build_canvas`` but tile the INVERSE-DESIGNED microstructures
+    (``cell_designs/cell_XXX/canvas.npy``) instead of the raw nearest-dataset
+    cells, and carry their optimised homogenised stiffness
+    (``weights.npz['pred_flat4'/'pred_rho']``) into the matched sweep.
+
+    Builds the NN baseline first (for the cloak mask, bbox, grid and any cloak
+    cells that don't yet have an inverse design) then OVERRIDES each cloak cell
+    that has a design.  Returns the same tuple as ``build_canvas``.
+    """
+    (canvas, (n_x, n_y), (H, W), cloak_bbox,
+     matched_cell_C_flat, matched_cell_rho, diag) = build_canvas(
+        optimized_params_npz, dataset_h5, config_path, rho_weight=rho_weight,
+    )
+
+    cloak_mask, _centers, _info = _build_cloak_mask(config_path, n_x, n_y)
+    cloak_idx = np.where(cloak_mask)[0]
+
+    n_have = 0
+    missing = []
+    for idx in cloak_idx:
+        cdir = cell_designs_dir / f"cell_{int(idx):03d}"
+        cpath, wpath = cdir / "canvas.npy", cdir / "weights.npz"
+        if not (cpath.exists() and wpath.exists()):
+            missing.append(int(idx))
+            continue
+        cell_canvas = np.load(str(cpath)).astype(canvas.dtype)   # (H, W) binary
+        # tile mapping from _tile_image: idx = ix*n_y + iy ; row = n_y-1-iy ; col = ix
+        ix, iy = int(idx) // n_y, int(idx) % n_y
+        row, col = n_y - 1 - iy, ix
+        canvas[row * H:(row + 1) * H, col * W:(col + 1) * W] = cell_canvas
+        w = np.load(str(wpath))
+        pf = np.asarray(w["pred_flat4"])                # [C11, C22, C12, C66]
+        # -> optimiser/dataset flat order [C11, C22, C66, C12]
+        matched_cell_C_flat[idx] = pf[[0, 1, 3, 2]]
+        matched_cell_rho[idx] = float(w["pred_rho"])
+        n_have += 1
+
+    diag.update(source="cell_designs (inverse design)",
+                n_inverse_cells_used=n_have, n_missing_fell_back_to_nn=len(missing))
+    if missing:
+        print(f"  WARNING: {len(missing)} cloak cells have no inverse design yet "
+              f"(fell back to NN): {missing[:12]}{'…' if len(missing) > 12 else ''}")
+    print(f"  inverse-design cells tiled: {n_have}/{len(cloak_idx)}")
+    return (canvas, (n_x, n_y), (H, W), cloak_bbox,
+            matched_cell_C_flat, matched_cell_rho, diag)
+
+
 # ── frequency sweep helpers (mirror frequency_sweep.py) ─────────────
 
 
@@ -601,6 +655,12 @@ def main() -> None:
                    help="E_void / E_cement ratio for ersatz-material void.")
     p.add_argument("--rho-weight", type=float, default=1.0,
                    help="Weight on standardised ρ in the matching distance.")
+    p.add_argument("--cell-designs", type=Path, default=None,
+                   help="Directory of inverse-designed cells (cell_XXX/canvas.npy + "
+                        "weights.npz). When given, tile THESE microstructures (and use "
+                        "their pred_flat4/pred_rho for the matched sweep) instead of the "
+                        "raw nearest-dataset cells. Cloak cells without a design fall back "
+                        "to NN. Use a distinct -o to keep NN-baseline CSVs separate.")
     p.add_argument("-f", "--force", action="store_true",
                    help="Re-run solves even if existing CSVs are present.")
     p.add_argument("--no-matched", action="store_true",
@@ -624,11 +684,20 @@ def main() -> None:
     }
 
     # ── build the canvas (matching) ─────────────────────────────────
-    print("=== Matching cloak cells & assembling canvas ===")
-    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag = build_canvas(
-        Path(args.params), Path(args.dataset), Path(args.config),
-        rho_weight=args.rho_weight,
-    )
+    if args.cell_designs is not None:
+        print(f"=== Tiling INVERSE-DESIGNED cells from {args.cell_designs} ===")
+        canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag = (
+            build_canvas_from_cell_designs(
+                Path(args.params), Path(args.dataset), Path(args.config),
+                Path(args.cell_designs), rho_weight=args.rho_weight,
+            )
+        )
+    else:
+        print("=== Matching cloak cells & assembling canvas (nearest dataset cell) ===")
+        canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag = build_canvas(
+            Path(args.params), Path(args.dataset), Path(args.config),
+            rho_weight=args.rho_weight,
+        )
     print(
         f"canvas shape: {canvas.shape}  ({n_y}×{H_pix}, {n_x}×{W_pix})  "
         f"cloak cells: {diag['n_cloak']}/{diag['n_cells']}  "
