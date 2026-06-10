@@ -251,6 +251,7 @@ def design_one_cell(
     resume: bool,
     weight_conn: float = 0.0,
     conn_steps: int = 200,
+    beta_init: float = 1.0,
     beta_final: float = 32.0,
     beta_warmup_frac: float = 0.15,
     beta_ramp_frac: float = 0.25,
@@ -313,6 +314,7 @@ def design_one_cell(
         weight_rho=weight_rho,
         weight_conn=weight_conn,
         conn_steps=conn_steps,
+        beta_init=beta_init,
         beta_final=beta_final,
         beta_warmup_frac=beta_warmup_frac,
         beta_ramp_frac=beta_ramp_frac,
@@ -456,6 +458,11 @@ def main() -> None:
                              "the dataset NN init already supplies a connected topology.")
     parser.add_argument("--conn-steps", type=int, default=200,
                         help="Flood iterations for connectivity loss (default 200)")
+    parser.add_argument("--beta-init", type=float, default=1.0,
+                        help="Initial Heaviside-projection sharpness (default 1 = gray start, "
+                             "allows soft refinement). Higher values (e.g. 8) saturate the "
+                             "sigmoid → ~zero gradient → the field is frozen at the init and "
+                             "cannot refine; only useful for diagnostics.")
     parser.add_argument("--beta-final", type=float, default=32.0,
                         help="Final Heaviside-projection sharpness (default 32). Higher → "
                              "soft field closer to binary, shrinking the soft→binary gap.")
@@ -560,6 +567,7 @@ def main() -> None:
             weight_rho=args.weight_rho,
             weight_conn=args.weight_conn,
             conn_steps=args.conn_steps,
+            beta_init=args.beta_init,
             beta_final=args.beta_final,
             beta_warmup_frac=args.beta_warmup_frac,
             beta_ramp_frac=args.beta_ramp_frac,
