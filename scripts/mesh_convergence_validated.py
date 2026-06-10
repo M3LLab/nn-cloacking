@@ -97,7 +97,9 @@ def main() -> None:
     csv_path = out_dir / f"mesh_convergence_validated_f{args.f_star:.2f}.csv"
 
     print(f"=== Matching cloak cells & assembling canvas ===")
-    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, diag = fsv.build_canvas(
+    # build_canvas also returns matched_cell_C_flat / matched_cell_rho for the
+    # cell-level (homogenised) path; the pixel-level convergence study ignores them.
+    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, _matched_C, _matched_rho, diag = fsv.build_canvas(
         Path(args.params), Path(args.dataset), Path(args.config),
         rho_weight=args.rho_weight,
     )

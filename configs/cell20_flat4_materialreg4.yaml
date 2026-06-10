@@ -41,7 +41,7 @@ solver:
 cells:
   enabled: true
   init: dataset_centroid
-  init_path: output/ca_bulk_squared/gmm_flat4.npz
+  init_path: dataset/gmm_flat4.npz
   n_x: 20
   n_y: 15
   n_C_params: 4
@@ -53,7 +53,7 @@ loss:
   regularizations:
     material_cement_GMM:
       enabled: true
-      path: output/ca_bulk_squared/gmm_flat4.npz
+      path: dataset/gmm_flat4.npz
       weight: 0.1
       quantile: 0.25
 
@@ -71,7 +71,7 @@ optimization:
   lambda_neighbor: 0.0
   plot_every: 10
   neural:
-    # init_weights: ""   # no prior run yet; start from a fresh MLP
+    #init_weights: "output/cell20_flat4_materialreg4/best_weights.npz"   # no prior run yet; start from a fresh MLP
     hidden_size: 512
     n_layers: 6
     n_fourier: 64

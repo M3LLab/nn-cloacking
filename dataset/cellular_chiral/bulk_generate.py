@@ -43,12 +43,12 @@ def main() -> None:
     parser.add_argument("-n", "--num", type=int, default=1_000_000, help="Number of cells")
     parser.add_argument("--assembly", type=str, default="squared", help="Assembly type (chiral or squared). Default is squared.")
     parser.add_argument("-s", "--seed", type=int, default=0, help="Base RNG seed")
-    parser.add_argument("-o", "--output", type=Path, default=Path("output/ca_bulk_squared"))
+    parser.add_argument("-o", "--output", type=Path, default=Path("output/unit_cells_D2"))
     parser.add_argument("--lf-min", type=float, default=0.20, help="Min live_fraction")
     parser.add_argument("--lf-max", type=float, default=0.80, help="Max live_fraction")
     parser.add_argument("-j", "--workers", type=int, default=mp.cpu_count())
-    parser.add_argument("--max-bytes", type=int, default=10 * 1024**3,
-                        help="Hard cap on total cells.npy size in bytes (default 10 GiB)")
+    parser.add_argument("--max-bytes", type=int, default=50 * 1024**3,
+                        help="Hard cap on total cells.npy size in bytes (default 50 GiB)")
     args = parser.parse_args()
 
     out_dir: Path = args.output

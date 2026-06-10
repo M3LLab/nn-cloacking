@@ -47,6 +47,10 @@ def load_neural_field(nf_config, cell_decomp, params_init):
         n_fourier=nf_config.n_fourier,
         seed=nf_config.seed,
         output_scale=nf_config.output_scale,
+        constrained=getattr(nf_config, "constrained", False),
+        kappa=getattr(nf_config, "kappa", 0.95),
+        cap_anisotropy=getattr(nf_config, "cap_anisotropy", True),
+        anisotropy_ratio=getattr(nf_config, "anisotropy_ratio", 15.0),
     )
 
     weights_path = getattr(nf_config, "init_weights", None) or getattr(nf_config, "ckpt", None)

@@ -16,6 +16,21 @@ with older readers; they alias ``C12`` and ``C66`` respectively. Be aware
 those names assume isotropy that does NOT hold for these cells -- use
 ``C11/C22/C12/C66`` directly when you need the full elastic response.
 
+Homogenizer
+-----------
+
+Two paths, selected with ``--homog`` (provenance recorded in the HDF5 attrs
+``homog_method`` / ``homog_ele_type`` / ``homog_mesh_N`` / ``homog_elem_per_pixel``):
+
+* ``hifi`` (DEFAULT): quadratic **TRI6** elements on a configurable ``--mesh-N``
+  grid (default 100 = 2 elements/pixel for a 50x50 cell), with a single
+  factorization shared across the 4 load cases. This is the accurate path.
+* ``legacy``: the original linear **TRI3 at exactly 1 element/pixel**. Kept for
+  back-compat / reproducing the historical dataset. A mesh-convergence study
+  (``results/mesh_artifact/SUMMARY.md``) showed this **over-predicts stiffness**
+  by ~12%% (bulky cells) up to **>130%% (thin/low-vf cells)** because 1-pixel-wide
+  ligaments are a single linear element wide and cannot bend.
+
 Identical and "really similar" geometries are filtered out: a cell is skipped
 if its raw bytes (exact match) or its block-pooled fingerprint (near-duplicate
 match) has already been seen.
@@ -26,9 +41,17 @@ and how many were ignored as duplicates / FEM failures.
 Usage
 -----
 
+    # Default: hi-fi TRI6 @ 2 elements/pixel
     python -m dataset.cellular_chiral.bulk_stiffness \
         -i output/ca_bulk_squared \
+        -o output/ca_bulk_squared/stiffness_tri6.h5
+
+    # Reproduce the historical dataset (legacy linear TRI3 @ 1 element/pixel)
+    python -m dataset.cellular_chiral.bulk_stiffness --homog legacy \
         -o output/ca_bulk_squared/stiffness.h5
+
+    # Higher accuracy for thin cells (4 elements/pixel) -- slower
+    python -m dataset.cellular_chiral.bulk_stiffness --mesh-N 200
 
     # Process a slice (useful when 2M is too large to chew through at once)
     python -m dataset.cellular_chiral.bulk_stiffness --start 0 --num 50000
@@ -71,6 +94,7 @@ with contextlib.redirect_stdout(io.StringIO()):
         compute_average_stress,
         make_structured_tri_mesh,
     )
+    from ..stiffness.calc_fem_hifi import compute_stiffness_hifi, estimate_and_warn
 
 logging.getLogger("jax_fem").setLevel(logging.ERROR)
 
@@ -143,6 +167,22 @@ def _compute_stiffness(
 
     rho_eff = vf * rho_solid
     return C_eff, rho_eff, vf
+
+
+def _stiffness(
+    pixel_image: np.ndarray,
+    rho_solid: float,
+    method: str,
+    mesh_N: int,
+    ele_type: str,
+) -> tuple[np.ndarray, float, float]:
+    """Dispatch to the hi-fi (TRI6/TRI3, factor-once, mesh res N) or the legacy
+    (TRI3 @ 1-element-per-pixel) homogenizer. Both return (C_eff 4x4, rho, vf)."""
+    if method == "legacy":
+        return _compute_stiffness(pixel_image, rho_solid=rho_solid)
+    return compute_stiffness_hifi(
+        pixel_image, N=mesh_N, ele_type=ele_type, rho_solid=rho_solid
+    )
 
 
 def _ortho_params_from_C(C: np.ndarray) -> tuple[float, float, float, float]:
@@ -336,11 +376,23 @@ def _dedup_pass(
 # means the OS shares the underlying file pages with all workers for free.
 _W_CELLS: np.ndarray | None = None
 _W_RHO_SOLID: float = RHO_CEMENT
+_W_METHOD: str = "hifi"
+_W_MESH_N: int = 100
+_W_ELE_TYPE: str = "TRI6"
 
 
-def _worker_init(cells_path_str: str, rho_solid: float = RHO_CEMENT) -> None:
-    global _W_CELLS, _W_RHO_SOLID
+def _worker_init(
+    cells_path_str: str,
+    rho_solid: float = RHO_CEMENT,
+    method: str = "hifi",
+    mesh_N: int = 100,
+    ele_type: str = "TRI6",
+) -> None:
+    global _W_CELLS, _W_RHO_SOLID, _W_METHOD, _W_MESH_N, _W_ELE_TYPE
     _W_RHO_SOLID = float(rho_solid)
+    _W_METHOD = str(method)
+    _W_MESH_N = int(mesh_N)
+    _W_ELE_TYPE = str(ele_type)
 
     # Pin this worker to a distinct logical CPU so its thread pool can't
     # oversubscribe the box. Fall back silently on platforms without
@@ -370,7 +422,7 @@ def _worker_run(args: tuple[int, int]) -> tuple[int, np.ndarray | None, float | 
     cell = np.asarray(_W_CELLS[src_idx], dtype=np.int8)
     try:
         with _Timeout(timeout):
-            C, rho, vf = _compute_stiffness(cell, rho_solid=_W_RHO_SOLID)
+            C, rho, vf = _stiffness(cell, _W_RHO_SOLID, _W_METHOD, _W_MESH_N, _W_ELE_TYPE)
         return (src_idx, C, rho, vf, None)
     except TimeoutError:
         return (src_idx, None, None, None, "TIMEOUT")
@@ -467,10 +519,35 @@ def main() -> None:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=5,
-        help="Per-sample FEM timeout in seconds. Convergent cells solve in <1s; "
-             "non-convergent cells (Newton oscillates around tolerance) hang until "
-             "this fires. 5s is a comfortable upper bound for healthy cells.",
+        default=60,
+        help="Per-sample FEM timeout in seconds. Legacy TRI3@1px cells solve in "
+             "<1s; hi-fi TRI6 cells take a few seconds at N=100 and longer at high "
+             "N. 60s is a comfortable upper bound; raise it for large --mesh-N.",
+    )
+    parser.add_argument(
+        "--homog",
+        choices=("hifi", "legacy"),
+        default="hifi",
+        help="Homogenizer. 'hifi' (default): quadratic TRI6, configurable mesh "
+             "resolution --mesh-N, single factorization shared by the 4 load cases "
+             "(accurate; the legacy TRI3@1px path over-predicts stiffness by "
+             "12%%-130%%). 'legacy': original linear TRI3 at 1 element/pixel "
+             "(kept for back-compat / reproducing the old dataset).",
+    )
+    parser.add_argument(
+        "--mesh-N",
+        type=int,
+        default=100,
+        help="hi-fi homogenization mesh resolution (NxN), decoupled from the "
+             "pixel image. Default 100 = 2 elements/pixel for a 50x50 cell. A loud "
+             "warning fires below ~2 elem/pixel; below 1 the microstructure aliases.",
+    )
+    parser.add_argument(
+        "--ele-type",
+        choices=("TRI6", "TRI3"),
+        default="TRI6",
+        help="hi-fi element type: TRI6 (quadratic, default, ~2x more accurate per "
+             "resolution) or TRI3 (linear).",
     )
     parser.add_argument(
         "-j",
@@ -517,6 +594,13 @@ def main() -> None:
     fuzzy_pool = 1 if args.no_fuzzy_dedup else max(1, args.fuzzy_pool)
     n_workers = max(1, args.workers)
 
+    # Report the homogenization mesh and warn loudly if it under-resolves the
+    # microstructure (the whole point of the hi-fi path).
+    if args.homog == "hifi":
+        print(estimate_and_warn(args.mesh_N, int(H), args.ele_type))
+    else:
+        print(f"  homogenization: legacy TRI3 @ 1 element/pixel (N={H})")
+
     accepted_src: list[int] = []
     failed_src: list[int] = []
 
@@ -531,6 +615,16 @@ def main() -> None:
             f.attrs["rho_solid"] = float(args.rho_solid)
             # Keep legacy attr name in sync for older readers.
             f.attrs["rho_cement"] = float(args.rho_solid)
+            # Record how the stiffness was homogenized (provenance).
+            f.attrs["homog_method"] = args.homog
+            if args.homog == "hifi":
+                f.attrs["homog_ele_type"] = args.ele_type
+                f.attrs["homog_mesh_N"] = int(args.mesh_N)
+                f.attrs["homog_elem_per_pixel"] = float(args.mesh_N) / float(H)
+            else:
+                f.attrs["homog_ele_type"] = "TRI3"
+                f.attrs["homog_mesh_N"] = int(H)
+                f.attrs["homog_elem_per_pixel"] = 1.0
 
         # Resume: pre-populate dedup sets from already-stored cells, drop those
         # source indices from the work list.
@@ -564,7 +658,10 @@ def main() -> None:
                 cell = np.asarray(cells[src_idx], dtype=np.uint8)
                 try:
                     with _Timeout(args.timeout):
-                        C, rho, vf = _compute_stiffness(cell.astype(np.int8), rho_solid=args.rho_solid)
+                        C, rho, vf = _stiffness(
+                            cell.astype(np.int8), args.rho_solid,
+                            args.homog, args.mesh_N, args.ele_type,
+                        )
                 except TimeoutError:
                     tqdm.write(f"  TIMEOUT (>{args.timeout}s) at src={src_idx}")
                     failed_src.append(src_idx)
@@ -593,7 +690,8 @@ def main() -> None:
             with ctx.Pool(
                 processes=n_workers,
                 initializer=_worker_init,
-                initargs=(str(cells_path), float(args.rho_solid)),
+                initargs=(str(cells_path), float(args.rho_solid),
+                          args.homog, int(args.mesh_N), args.ele_type),
             ) as pool:
                 pbar = tqdm(
                     pool.imap_unordered(_worker_run, tasks, chunksize=chunksize),
