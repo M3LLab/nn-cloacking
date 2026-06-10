@@ -235,6 +235,17 @@ def make_cell_neural_field(
         q = np.clip(q, initial_soft_eps, 1.0 - initial_soft_eps)
         init_q_jnp = jnp.array(q)
 
+        # Freeze the (frozen) border to the dataset cell's OWN border rather than
+        # the strict gate_width stencil.  The dataset's CA construction always
+        # keeps the central gate material but often grows it WIDER; forcing the
+        # narrow stencil chops that extra border material and disconnects some
+        # cells (C11 collapse).  Union with the stencil guarantees the central
+        # gate stays material (tiling), while preserving the cell's wider gates.
+        frozen = ~np.asarray(interior_mask)
+        nn_bin = (np.asarray(initial_quadrant, dtype=np.float32) > 0.5).astype(np.float32)
+        bv = np.maximum(np.asarray(border_vals), nn_bin)
+        border_vals = jnp.array(np.where(frozen, bv, np.asarray(border_vals)))
+
     nf = CellNeuralField(
         features=features,
         border_vals=border_vals,
