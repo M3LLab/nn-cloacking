@@ -654,6 +654,7 @@ def run_cell_design(
     opt_state_init: AdamState | None = None,
     step_callback=None,
     tol: float = 0.001,
+    straight_through: bool = False,
 ) -> CellDesignResult:
     """Optimize MLP weights to produce a cell matching ``target_flat4`` and ``target_rho``.
 
@@ -699,8 +700,17 @@ def run_cell_design(
 
     use_conn = weight_conn > 0.0
 
-    def _loss_with_aux(t, beta):
-        canvas = neural_field.decode_canvas(t, beta)
+    def _loss_with_aux(t, beta, ste):
+        soft = neural_field.decode_canvas(t, beta)
+        if ste:
+            # Straight-through estimator: forward uses the {0,1} canvas (so the
+            # loss/metrics reflect the binarized DELIVERABLE), backward flows
+            # through the soft field.  This closes the soft→binary gap by
+            # optimizing the binary effective stiffness directly.
+            hard = jnp.where(soft > 0.5, 1.0, 0.0)
+            canvas = soft + jax.lax.stop_gradient(hard - soft)
+        else:
+            canvas = soft
         flat4 = compute_flat4(canvas, setup)
         rho = compute_rho_eff(canvas, setup)
         conn = (gate_connectivity_loss(canvas, n_steps=conn_steps)
@@ -713,7 +723,7 @@ def run_cell_design(
             L = L + weight_conn * conn
         return L, (flat4, rho, conn)
 
-    # grad only w.r.t. theta (argnums=0); beta is a fixed schedule value per step.
+    # grad only w.r.t. theta (argnums=0); beta and ste are per-step constants.
     loss_and_grad = jax.value_and_grad(_loss_with_aux, has_aux=True)
 
     def _beta_at(t_frac: float) -> tuple[float, bool]:
@@ -757,7 +767,11 @@ def run_cell_design(
         # the schedule leaves no explicit held tail (e.g. ramp_frac too large).
         hardened = hardened or (step == n_iters - 1)
 
-        (loss_val, (flat4, rho, conn)), grads = loss_and_grad(theta, cur_beta)
+        # Straight-through only in the hardened tail: the geometry forms on the
+        # smooth (soft) landscape first, then we switch to optimizing the
+        # binarized field directly so best_theta/early-stop track the deliverable.
+        use_ste_now = straight_through and hardened
+        (loss_val, (flat4, rho, conn)), grads = loss_and_grad(theta, cur_beta, use_ste_now)
         loss_float = float(loss_val)
         flat4_list = [float(v) for v in flat4]
         rho_float = float(rho)

@@ -8,7 +8,12 @@ For each cloak cell a neural field is optimized so that the periodic-FEM effecti
 stiffness [C11, C22, C12, C66] and density rho of the assembled 50×50
 microstructure match the target.  Optimization stops when every component's
 relative error is below ``--tol`` (default 0.001) or after ``--n-iters`` steps
-(default 100), whichever comes first.
+(default 350), whichever comes first.
+
+Defaults encode the tuned config: dataset NN init, connectivity penalty OFF
+(--weight-conn 0), beta projection 1→32 with a straight-through estimator in the
+hardened tail (--straight-through, on by default), lr 2e-3→3e-4.  This took
+cell_014 from ~10–24% to ~3% binary-matching error; see the per-cell summary.
 
 Flat4 index mapping (n_C_params=4, C_to_flatC in materials.py):
     optimized_params index 0 → C_1111 = C11
@@ -244,6 +249,12 @@ def design_one_cell(
     weight_rho: float,
     tol: float,
     resume: bool,
+    weight_conn: float = 0.0,
+    conn_steps: int = 200,
+    beta_final: float = 32.0,
+    beta_warmup_frac: float = 0.15,
+    beta_ramp_frac: float = 0.25,
+    straight_through: bool = True,
     ds_cache: DatasetCache | None = None,
     nn_rho_weight: float = 1.0,
 ) -> dict | None:
@@ -300,6 +311,12 @@ def design_one_cell(
         theta_init=theta_init,
         target_rho=target_rho,
         weight_rho=weight_rho,
+        weight_conn=weight_conn,
+        conn_steps=conn_steps,
+        beta_final=beta_final,
+        beta_warmup_frac=beta_warmup_frac,
+        beta_ramp_frac=beta_ramp_frac,
+        straight_through=straight_through,
         n_iters=n_iters,
         lr=lr,
         lr_end=lr_end,
@@ -314,7 +331,7 @@ def design_one_cell(
     # field).  The hardened soft canvas (beta=beta_final) is kept only as a
     # diagnostic; its gap to the binary prediction tells us how well the
     # beta-projection actually drove the field to binary.
-    canvas_soft = nf.decode_canvas(result.best_theta, beta=16.0)
+    canvas_soft = nf.decode_canvas(result.best_theta, beta=beta_final)
     canvas_bin = nf.binarize(result.best_theta)
     canvas_bin_jnp = jnp.asarray(canvas_bin, dtype=jnp.float32)
     pred_flat4 = np.asarray(compute_flat4(canvas_bin_jnp, setup))
@@ -421,17 +438,37 @@ def main() -> None:
                         help="Index into the cloak-cell list to start from")
     parser.add_argument("--num", type=int, default=None,
                         help="Number of cloak cells to process (default: all)")
-    parser.add_argument("--n-iters", type=int, default=1000,
-                        help="Max Adam steps per cell (default 100)")
+    parser.add_argument("--n-iters", type=int, default=350,
+                        help="Max Adam steps per cell (default 350, tuned config)")
     parser.add_argument("--tol", type=float, default=0.001,
                         help="Early-stop threshold: max relative error (default 0.001)")
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--lr-end", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--lr-end", type=float, default=3e-4)
     parser.add_argument("--n-fourier", type=int, default=32)
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--weight-rho", type=float, default=10.0)
+    parser.add_argument("--weight-conn", type=float, default=0.0,
+                        help="Weight for gate connectivity penalty (default 0 = off). "
+                             "Nonzero values dominate the stiffness/rho matching terms and "
+                             "wreck the match (conn loss ~0.8×weight vs ~0.13 matching); "
+                             "the dataset NN init already supplies a connected topology.")
+    parser.add_argument("--conn-steps", type=int, default=200,
+                        help="Flood iterations for connectivity loss (default 200)")
+    parser.add_argument("--beta-final", type=float, default=32.0,
+                        help="Final Heaviside-projection sharpness (default 32). Higher → "
+                             "soft field closer to binary, shrinking the soft→binary gap.")
+    parser.add_argument("--beta-warmup-frac", type=float, default=0.15,
+                        help="Fraction of iters held at beta_init before ramping (default 0.15)")
+    parser.add_argument("--beta-ramp-frac", type=float, default=0.25,
+                        help="Fraction of iters ramping beta_init→beta_final (default 0.25); "
+                             "remaining tail held at beta_final (the straight-through phase)")
+    parser.add_argument("--straight-through", action=argparse.BooleanOptionalAction, default=True,
+                        help="Use a straight-through estimator in the hardened tail: optimize "
+                             "the BINARIZED effective stiffness directly (closes soft→binary gap). "
+                             "best_theta/early-stop then track the actual binary deliverable. "
+                             "Default on; disable with --no-straight-through.")
     parser.add_argument("--simp-p", type=float, default=3.0,
                         help="SIMP exponent (default 3; penalizes gray during the soft phase "
                              "so the target stays binary-reachable. Inert once beta-projection "
@@ -521,6 +558,12 @@ def main() -> None:
             n_layers=args.n_layers,
             seed=args.seed,
             weight_rho=args.weight_rho,
+            weight_conn=args.weight_conn,
+            conn_steps=args.conn_steps,
+            beta_final=args.beta_final,
+            beta_warmup_frac=args.beta_warmup_frac,
+            beta_ramp_frac=args.beta_ramp_frac,
+            straight_through=args.straight_through,
             tol=args.tol,
             resume=args.resume,
             ds_cache=ds_cache,
