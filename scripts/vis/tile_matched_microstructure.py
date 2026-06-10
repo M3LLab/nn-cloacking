@@ -1,11 +1,22 @@
-"""Match each optimised macro cell to its nearest dataset entry by (λ, μ, ρ)
-and tile the 50×50 microstructures into a single image.
+"""Match each optimised macro cell to its nearest dataset entry and tile the
+50×50 microstructures into a single image.
 
-For each macro cell of an optimisation result we pick the dataset cell whose
-(λ, μ, ρ) is closest in standardised Euclidean distance (the same standardisation
-used to fit the GMM regulariser, so this is consistent with how the optimiser
-saw the manifold). The matched binary microstructure is laid out at the same
-(ix, iy) location the macro cell occupies.
+The feature vector used for matching depends on ``n_C_params`` in the run's
+config:
+
+* ``n_C_params=2`` — match on (λ, μ, ρ) (standardised L2). This is the same
+  feature space the GMM regulariser fits, so it stays consistent with how the
+  optimiser saw the dataset manifold.
+* ``n_C_params=4`` — match on the four flat4 stiffness components
+  (C[0,0,0,0], C[1,1,1,1], C[0,1,0,1], C[0,0,1,1]) plus ρ. The dataset's
+  augmented-Voigt 4×4 ``C_eff`` is projected onto those same indices so the
+  comparison is component-wise consistent with the optimiser's parameterisation.
+
+The matched binary microstructure is laid out at the same (ix, iy) location the
+macro cell occupies. The side-car ``.npz`` carries the matched per-cell stiffness
+(``matched_cell_C_flat`` of shape ``(n_cells, n_C_params)``) and density
+(``matched_cell_rho``) so downstream homogenised-FEM scripts can re-solve with
+the snapped dataset values instead of the optimiser's continuous output.
 
 Usage
 -----
@@ -91,6 +102,19 @@ def _build_cloak_mask(config_path: Path, n_x: int, n_y: int) -> tuple[np.ndarray
 def _flat2_to_lame(cell_C_flat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """For ``n_C_params=2`` the flat layout is already [λ, μ]."""
     return cell_C_flat[:, 0], cell_C_flat[:, 1]
+
+
+# flat4 ↔ orthotropic engineering constants (D2 squared assembly):
+#
+# ``rayleigh_cloak.materials.C_to_flatC`` lays the 4-component flat array as
+#   [ C[0,0,0,0],  C[1,1,1,1],  C[0,1,0,1],  C[0,0,1,1] ]
+# which, in the engineering-constant naming used by ``backfill_ortho_params.py``,
+# is
+#   [ C11, C22, C66, C12 ].
+#
+# The dataset exposes C11/C22/C12/C66 as 1-D arrays after the backfill, so we
+# just stack them in that order.
+_FLAT4_DATASET_FIELDS = ("C11", "C22", "C66", "C12")
 
 
 def _resolve_grid(config_path: Path | None, n_cells: int) -> tuple[int, int]:
@@ -193,14 +217,12 @@ def main() -> None:
     cell_C_flat = npz["cell_C_flat"]
     cell_rho = npz["cell_rho"]
     n_cells, n_C_params = cell_C_flat.shape
-    if n_C_params != 2:
+    if n_C_params not in (2, 4):
         raise SystemExit(
-            f"this script handles n_C_params=2 (flat2 = [λ, μ]); got {n_C_params}. "
-            "Extend _flat2_to_lame() if you need to handle 6/10/16."
+            f"this script handles n_C_params∈{{2, 4}}; got {n_C_params}. "
+            "Extend the feature-extraction block below to handle 6/10/16."
         )
-    lam_q, mu_q = _flat2_to_lame(cell_C_flat)
-    rho_q = cell_rho
-    print(f"loaded {n_cells} optimised cells from {args.params}")
+    print(f"loaded {n_cells} optimised cells from {args.params} (n_C_params={n_C_params})")
 
     # ── grid layout + cloak mask ────────────────────────────────────
     config_path = args.config if args.config is not None else args.params.parent / "config.yaml"
@@ -218,31 +240,51 @@ def main() -> None:
     print(f"cloak cells: {n_cloak}/{n_cells}  ({n_cloak/n_cells:.1%})")
     print(f"defect cells: {n_defect}/{n_cells}  ({n_defect/n_cells:.1%})")
 
-    # ── load dataset (λ, μ, ρ) and standardise ──────────────────────
+    # ── load dataset and build matching feature vectors ─────────────
+    # Two matching modes, keyed by n_C_params:
+    #   2 → match in (λ, μ, ρ)            (3-D)
+    #   4 → match in (flat4 stiffness, ρ)  (5-D); dataset's augmented-Voigt
+    #       C_eff is projected onto the flat4 layout.
     print(f"loading dataset {args.dataset} ...")
     t0 = time.time()
     with h5py.File(args.dataset, "r") as f:
-        lam_ds = f["lambda_"][:]
-        mu_ds = f["mu"][:]
         rho_ds = f["rho"][:]
-        n_ds = lam_ds.size
-    print(f"  {n_ds} dataset cells  ({time.time()-t0:.1f}s)")
+        if n_C_params == 2:
+            lam_ds = f["lambda_"][:]
+            mu_ds = f["mu"][:]
+            X_ds = np.column_stack([lam_ds, mu_ds, rho_ds]).astype(np.float64)
+            feature_names = ["lambda", "mu", "rho"]
+        else:  # n_C_params == 4
+            missing = [k for k in _FLAT4_DATASET_FIELDS if k not in f]
+            if missing:
+                raise SystemExit(
+                    f"{args.dataset}: missing orthotropic fields {missing}. "
+                    "Run dataset/cellular_chiral/backfill_ortho_params.py to "
+                    "populate C11/C22/C12/C66 from C_eff first."
+                )
+            flat4_ds = np.column_stack([f[k][:] for k in _FLAT4_DATASET_FIELDS])
+            X_ds = np.column_stack([flat4_ds, rho_ds]).astype(np.float64)
+            feature_names = [*_FLAT4_DATASET_FIELDS, "rho"]
+        n_ds = X_ds.shape[0]
+    print(f"  {n_ds} dataset cells, feature dim={X_ds.shape[1]} ({feature_names})  ({time.time()-t0:.1f}s)")
 
-    X_ds = np.column_stack([lam_ds, mu_ds, rho_ds]).astype(np.float64)
     mean = X_ds.mean(axis=0)
     std = X_ds.std(axis=0)
     Xs_ds = (X_ds - mean) / std
 
-    # Restrict the query to cloak cells only — non-cloak cells are background
-    # (cement) and there's no point matching them; they'd snap to a near-solid
-    # dataset entry that visually clutters the plot the user wants.
+    # Query: per-cell (flat4 or λ/μ) + ρ, then standardised the same way.
+    if n_C_params == 2:
+        X_q_full = np.column_stack([cell_C_flat[:, 0], cell_C_flat[:, 1], cell_rho]).astype(np.float64)
+    else:
+        X_q_full = np.column_stack([cell_C_flat, cell_rho]).astype(np.float64)  # (n_cells, 5)
+
     cloak_indices = np.where(cloak_mask)[0]
-    X_q_full = np.column_stack([lam_q, mu_q, rho_q]).astype(np.float64)
     X_q = X_q_full[cloak_indices]
     Xs_q = (X_q - mean) / std
-    Xs_q[:, 2] *= args.rho_weight                     # downweight ρ if requested
+    # ρ is always the last column under both modes.
+    Xs_q[:, -1] *= args.rho_weight
     Xs_ds_w = Xs_ds.copy()
-    Xs_ds_w[:, 2] *= args.rho_weight
+    Xs_ds_w[:, -1] *= args.rho_weight
 
     # ── nearest neighbours (brute force; fine at 90-ish × 156k) ─────
     print(f"computing nearest neighbours for {cloak_indices.size} cloak cells ...")
@@ -259,7 +301,7 @@ def main() -> None:
         f"median={np.median(cloak_match_d):.3f}  max={cloak_match_d.max():.3f}"
     )
 
-    # ── pull the matched binary geometries ─────────────────────────
+    # ── pull the matched binary geometries + matched stiffness/density ──
     # h5py fancy-indexing requires strictly-increasing unique indices, so we
     # de-duplicate (multiple macro cells can match the same dataset entry)
     # and then scatter back by inverse map.
@@ -268,8 +310,26 @@ def main() -> None:
     t0 = time.time()
     with h5py.File(args.dataset, "r") as f:
         unique_geoms = f["cells"][unique_idx.tolist()]            # (n_unique, H, W)
+        # Pull the matched dataset properties at the same indices so the
+        # side-car npz can feed a downstream "matched homogenised" sweep.
+        if n_C_params == 2:
+            matched_lam = f["lambda_"][unique_idx.tolist()][inverse]
+            matched_mu = f["mu"][unique_idx.tolist()][inverse]
+            matched_cell_C_flat_cloak = np.column_stack([matched_lam, matched_mu])
+        else:  # n_C_params == 4
+            matched_cell_C_flat_cloak = np.column_stack([
+                f[k][unique_idx.tolist()][inverse] for k in _FLAT4_DATASET_FIELDS
+            ])  # (n_cloak, 4)
+        matched_rho_cloak = f["rho"][unique_idx.tolist()][inverse]
     cloak_geoms = unique_geoms[inverse]                            # (n_cloak, H, W)
     print(f"  done ({time.time()-t0:.1f}s)")
+
+    # Build full (n_cells,…) matched arrays. Non-cloak cells keep the optimiser's
+    # original values (those are background cement, no snapping needed).
+    matched_cell_C_flat = np.array(cell_C_flat, dtype=np.float64, copy=True)
+    matched_cell_C_flat[cloak_indices] = matched_cell_C_flat_cloak
+    matched_cell_rho = np.array(cell_rho, dtype=np.float64, copy=True)
+    matched_cell_rho[cloak_indices] = matched_rho_cloak
 
     # Build a full (n_cells, H, W) array — non-cloak cells stay zero (= white
     # in cmap='gray_r'), so they show as empty in the tiled plot.
@@ -346,7 +406,7 @@ def main() -> None:
     ax_q.set_xticks([])
     ax_q.set_yticks([])
     ax_q.set_title(
-        "match quality (std-L2 distance in λ, μ, ρ)",
+        f"match quality (std-L2 distance in {', '.join(feature_names)})",
         fontsize=11,
     )
     cbar = fig.colorbar(im_q, ax=ax_q, fraction=0.046, pad=0.04)
@@ -361,7 +421,7 @@ def main() -> None:
     side_npz = out_path.with_suffix(".npz")
     np.savez(
         side_npz,
-        match_idx=match_idx,                # -1 for non-cloak cells
+        match_idx=match_idx,                       # -1 for non-cloak cells
         match_distance_std=match_d,
         cloak_mask=cloak_mask,
         n_x=np.int64(n_x),
@@ -370,7 +430,15 @@ def main() -> None:
         W=np.int64(W),
         feature_mean=mean,
         feature_std=std,
+        feature_names=np.array(feature_names),
         rho_weight=np.float64(args.rho_weight),
+        n_C_params=np.int64(n_C_params),
+        # Per-cell snapped stiffness/density: cloak cells take the matched
+        # dataset entry's value; non-cloak cells keep the optimiser's value
+        # (they're cement background — no snapping). Downstream scripts can
+        # plug these straight into the homogenised FEM solver.
+        matched_cell_C_flat=matched_cell_C_flat,
+        matched_cell_rho=matched_cell_rho,
     )
     print(f"saved {side_npz}")
 

@@ -292,6 +292,12 @@ def main():
                         help="Skip ideal cloak case")
     parser.add_argument("--no-optimized", action="store_true",
                         help="Skip optimized cloak case")
+    parser.add_argument("--fmin", type=float, default=0.7,
+                        help="Lower end of f_star sweep (default: 0.7).")
+    parser.add_argument("--fmax", type=float, default=3.3,
+                        help="Upper end of f_star sweep, inclusive (default: 3.3).")
+    parser.add_argument("--fstep", type=float, default=0.1,
+                        help="Step size for f_star sweep (default: 0.1).")
     args = parser.parse_args()
 
     if not args.no_optimized and args.params is None:
@@ -344,7 +350,7 @@ def main():
             print(f"Surface evaluation nodes beyond cloak: "
                   f"{len(cloak_surface_idx)}")
 
-        f_stars = np.arange(0.7, 3.35, 0.1)
+        f_stars = np.arange(args.fmin, args.fmax + 0.5 * args.fstep, args.fstep)
 
         shared = dict(
             base_config=base_config, f_stars=f_stars,

@@ -177,26 +177,89 @@ class NeuralReparam:
     rho_init: jnp.ndarray
     cloak_mask: jnp.ndarray
     output_scale: float = 0.1
+    # Physically-valid flat4 decode (see decode()). When False, the legacy
+    # unbounded multiplicative residual is used.
+    constrained: bool = False
+    kappa: float = 0.95
+    cap_anisotropy: bool = True
+    anisotropy_log_ratio: float = math.log(15.0)  # log(R) for the anisotropy cap
 
     def decode(self, theta: list[dict]) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Map MLP weights → (cell_C_flat, cell_rho).
 
-        Uses a *relative* (multiplicative) residual so that the correction
-        is proportional to the local initial value:
-            C(x,y) = C_init(x,y) * (1 + output_scale * Phi(x,y))
-        This handles the orders-of-magnitude variation in C_eff across the
-        cloak (near-zero at r_i, ~background at r_c) without needing
-        per-component normalization.
-        Non-cloak cells keep their initial (background) values.
+        Two modes, selected by ``constrained``:
+
+        * **Legacy (constrained=False):** a *relative* (multiplicative) residual
+          so the correction is proportional to the local initial value:
+              C(x,y) = C_init(x,y) * (1 + output_scale * Phi(x,y))
+          This handles the orders-of-magnitude variation in C_eff across the
+          cloak but places no bound on sign or anisotropy — the MLP can drive
+          a stiffness negative or to an unrealizable anisotropy ratio.
+
+        * **Constrained flat4 (constrained=True, n_C_params=4):** a
+          physically-valid parameterization of (C11, C22, C66, C12):
+              C11,C22,C66 = C_init * exp(output_scale * raw)      # > 0 always
+              g = 0.5*log(C11/C22); g_b = logR*tanh(g/logR)       # |C11/C22| in [1/R, R]
+              C11,C22 = geomean * exp(±g_b)                        # geomean preserved
+              C12 = kappa*tanh(raw) * sqrt(C11*C22)                # det>0, sign-free
+          so C11/C22/C66 > 0, the orthotropic block is positive-definite
+          (det = C11*C22*(1 - rho_corr^2) > 0 since |kappa*tanh| < 1), and the
+          anisotropy ratio is bounded. ``raw≈0`` at init reduces to C_init.
+
+        Non-cloak cells keep their initial (background) values exactly.
         """
         raw = mlp_forward(theta, self.cell_features)  # (n_cells, n_C_params+1)
         n_C = self.C_flat_init.shape[1]
+        s = self.output_scale
+        mask = self.cloak_mask
 
-        rel_C = raw[:, :n_C] * self.output_scale    # relative correction
-        rel_rho = raw[:, n_C] * self.output_scale
+        if self.constrained and n_C == 4:
+            C11i = self.C_flat_init[:, 0]
+            C22i = self.C_flat_init[:, 1]
+            C66i = self.C_flat_init[:, 2]
+            C12i = self.C_flat_init[:, 3]
 
-        cell_C = self.C_flat_init * (1.0 + rel_C * self.cloak_mask[:, None])
-        cell_rho = self.rho_init * jnp.maximum(1.0 + rel_rho * self.cloak_mask, 1e-6)
+            # 1) positive diagonal via log-space multiplicative residual
+            C11 = C11i * jnp.exp(s * raw[:, 0])
+            C22 = C22i * jnp.exp(s * raw[:, 1])
+            C66 = C66i * jnp.exp(s * raw[:, 2])
+
+            # 2) anisotropy cap — symmetric squash on the half-log-ratio,
+            #    geomean kept. g = 0.5*log(C11/C22) is bounded to [-logR/2, logR/2]
+            #    so the ratio C11/C22 = exp(2*g_b) lands in [1/R, R].
+            if self.cap_anisotropy:
+                half_logR = 0.5 * self.anisotropy_log_ratio
+                g = 0.5 * jnp.log(C11 / C22)
+                g_b = half_logR * jnp.tanh(g / half_logR)
+                geomean = jnp.sqrt(C11 * C22)
+                C11 = geomean * jnp.exp(g_b)
+                C22 = geomean * jnp.exp(-g_b)
+
+            # 3) C12 — correlation-coefficient coupling (PD det>0, allows C12<0).
+            #    Centred on the init correlation so raw=0 recovers C12_init: the
+            #    cap preserves geomean=sqrt(C11*C22), so C12(raw=0) = rho0*geomean
+            #    = C12_init when |rho0| < kappa. rho0 is clamped just inside the
+            #    PD-safe band (an init beyond it is pulled to the boundary).
+            rho0 = C12i / jnp.sqrt(C11i * C22i)
+            rho0c = jnp.clip(rho0, -self.kappa * (1 - 1e-6), self.kappa * (1 - 1e-6))
+            offset = jnp.arctanh(rho0c / self.kappa)
+            rho_corr = self.kappa * jnp.tanh(raw[:, 3] + offset)
+            C12 = rho_corr * jnp.sqrt(C11 * C22)
+
+            cell_C_c = jnp.stack([C11, C22, C66, C12], axis=-1)
+            cell_rho_c = self.rho_init * jnp.exp(s * raw[:, n_C])
+
+            # background cells pass C_flat_init / rho_init through unchanged
+            cell_C = jnp.where(mask[:, None], cell_C_c, self.C_flat_init)
+            cell_rho = jnp.where(mask, cell_rho_c, self.rho_init)
+            return (cell_C, cell_rho)
+
+        # legacy unbounded path (lame n_C=2, or constrained=False)
+        rel_C = raw[:, :n_C] * s            # relative correction
+        rel_rho = raw[:, n_C] * s
+
+        cell_C = self.C_flat_init * (1.0 + rel_C * mask[:, None])
+        cell_rho = self.rho_init * jnp.maximum(1.0 + rel_rho * mask, 1e-6)
 
         return (cell_C, cell_rho)
 
@@ -209,6 +272,10 @@ def make_neural_reparam(
     n_fourier: int = 32,
     seed: int = 42,
     output_scale: float = 0.1,
+    constrained: bool = False,
+    kappa: float = 0.95,
+    cap_anisotropy: bool = True,
+    anisotropy_ratio: float = 15.0,
 ) -> tuple[list[dict], NeuralReparam]:
     """Create a NeuralReparam and initialize the MLP weights.
 
@@ -247,6 +314,10 @@ def make_neural_reparam(
         rho_init=cell_rho_init,
         cloak_mask=mask,
         output_scale=output_scale,
+        constrained=constrained,
+        kappa=kappa,
+        cap_anisotropy=cap_anisotropy,
+        anisotropy_log_ratio=math.log(anisotropy_ratio),
     )
 
     return theta, reparam
@@ -453,6 +524,7 @@ def run_optimization_neural_multifreq(
     gmm_prior: GMMPrior | None = None,
     lambda_gmm: float = 0.0,
     n_C_params: int = 2,
+    max_norm: float = 1.0,
 ) -> NeuralOptimizationResult:
     """Run neural-reparam optimization over multiple frequencies in parallel.
 
@@ -468,6 +540,9 @@ def run_optimization_neural_multifreq(
         reference data, and loss function.
     max_workers : int
         Thread-pool size.  0 (default) → ``len(freq_targets)``.
+    max_norm : float
+        Global-norm clipping threshold for the combined gradient.  The
+        gradient is rescaled so its global L2 norm never exceeds this value.
     """
     n_freq = len(freq_targets)
     if max_workers <= 0:
@@ -563,14 +638,20 @@ def run_optimization_neural_multifreq(
             reg_grad = jax.grad(_reg_total)(theta)
             grads = jax.tree.map(lambda a, b: a + b, total_grad, reg_grad)
 
+            # Global-norm gradient clipping (before the Adam update).
+            gn = jnp.sqrt(sum(
+                jnp.sum(l["W"]**2) + jnp.sum(l["b"]**2) for l in grads
+            ))
+            scale = jnp.minimum(1.0, max_norm / (gn + 1e-12))
+            grads = jax.tree.map(lambda g: g * scale, grads)
+
             loss_val_float = total_cloak_loss + lambda_l2 * L_l2 + lambda_gmm * L_gmm
             loss_history.append(loss_val_float)
             cloak_history.append(total_cloak_loss)
             l2_history.append(L_l2)
 
-            grad_norm = float(jnp.sqrt(sum(
-                jnp.sum(l["W"]**2) + jnp.sum(l["b"]**2) for l in grads
-            )))
+            # Report the pre-clip global norm so clipping is observable.
+            grad_norm = float(gn)
 
             # Per-frequency breakdown
             per_freq = "  ".join(

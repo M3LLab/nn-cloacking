@@ -260,6 +260,29 @@ class NeuralReparamConfig(BaseModel):
     seed: int = 42
     output_scale: float = 0.1  # multiplier on MLP residual (controls max step size)
     init_weights: str = ""     # path to .npz with saved MLP weights for warm-start
+    # Physically-valid flat4 decode (n_C_params=4). When enabled, the decode
+    # parameterizes (C11, C22, C66, C12) so that C11/C22/C66 > 0, the orthotropic
+    # block is positive-definite (C11*C22 - C12^2 > 0), and the anisotropy ratio
+    # C11/C22 stays in [1/R, R]. Default off keeps the legacy unbounded residual
+    # bit-for-bit reproducible.
+    constrained: bool = False
+    kappa: float = 0.95            # |C12/sqrt(C11*C22)| bound (<1 => positive-definite)
+    cap_anisotropy: bool = True    # bound C11/C22 in [1/R, R] (flat4 constrained path)
+    anisotropy_ratio: float = 15.0  # R; ~ dataset C11/C22 p99 (12x) + margin
+
+    @model_validator(mode="after")
+    def _check_constrained_fields(self) -> "NeuralReparamConfig":
+        if self.constrained:
+            if not (0.0 < self.kappa < 1.0):
+                raise ValueError(
+                    f"kappa must be in (0, 1) for a positive-definite C12 "
+                    f"coupling; got {self.kappa}."
+                )
+            if self.anisotropy_ratio <= 1.0:
+                raise ValueError(
+                    f"anisotropy_ratio must be > 1; got {self.anisotropy_ratio}."
+                )
+        return self
 
 
 class TopoNeuralConfig(BaseModel):

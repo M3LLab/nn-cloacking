@@ -182,6 +182,211 @@ def transmitted_displacement_ratio_fixed(
     return float(np.mean(case_at_x)) / (float(np.mean(ref_at_x)) + 1e-30)
 
 
+# ── Mesh-independent area-weighted band metric ──────────────────────
+#
+# ``magnitude_band_integral`` averages |u| over whichever mesh nodes fall in
+# the band [y_top - depth, y_top]. That is mesh-density-dependent: the surface
+# refinement field grades element size within the band, and the *number* of
+# nodes (hence the implicit weighting) changes with every refinement, so the
+# node-mean is not a clean functional of the converged field. The functions
+# below sidestep that by sampling |u| on a *fixed* (x, y) grid over the band
+# (shared across all meshes) and interpolating from each mesh's own P1
+# triangulation. The grid is uniform, so an unweighted mean over the kept grid
+# points is an area average — the true area-weighted integral the
+# ``magnitude_band_integral`` name promises, evaluated mesh-independently.
+
+
+def make_band_grid_eval_points(
+    geometry,
+    params,
+    depth: float,
+    n_x: int,
+    n_y: int,
+    mode: str = "downstream",
+    noise_sigma: float = 0.0,
+    seed: int = 0,
+    depth_top: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(xs, ys)``: a fixed uniform grid over the band
+    ``[y_top - depth, y_top - depth_top]`` for mesh-independent fixed-grid metrics.
+
+    ``n_x`` x-positions span ``[x_off, x_off + W]`` (endpoints trimmed) crossed
+    with ``n_y`` y-positions evenly spaced in ``[y_top - depth, y_top - depth_top]``.
+    ``depth_top`` (default 0 → band reaches the free surface) lets the caller
+    carve a sub-surface validation band that *excludes* the trained one — e.g.
+    ``depth=1.0, depth_top=0.5`` is the strip just below a depth-0.5 training
+    band. ``depth == depth_top`` collapses to a single horizontal line; with the
+    default that is the free-surface line. ``mode`` mirrors ``band_x_filter``:
+    ``"downstream"`` keeps ``x > x_c``, ``"full"`` keeps the whole physical
+    x-range. Grid points inside the cloak or defect footprint are dropped (same
+    exclusion as the node-based band). The grid does not depend on any mesh, so
+    the resulting metric is a stable functional of the converged field. Raises
+    if every point is dropped.
+    """
+    if depth_top < 0.0:
+        raise ValueError(f"depth_top must be >= 0 (got {depth_top!r}).")
+    if depth < depth_top:
+        raise ValueError(
+            f"depth ({depth!r}) must be >= depth_top ({depth_top!r})."
+        )
+    if depth >= float(params.H):
+        raise ValueError(
+            f"depth ({depth!r}) must be < physical height H ({params.H!r})."
+        )
+    if mode not in ("downstream", "full"):
+        raise ValueError(f"Unknown mode {mode!r}; choose 'downstream' or 'full'.")
+    if n_x < 1 or n_y < 1:
+        raise ValueError(f"n_x and n_y must be >= 1 (got {n_x!r}, {n_y!r}).")
+
+    x_left = params.x_off
+    x_right = params.x_off + params.W
+    xs = np.linspace(x_left, x_right, n_x + 2)[1:-1]
+    if noise_sigma > 0:
+        rng = np.random.default_rng(seed)
+        xs = xs + rng.normal(0.0, float(noise_sigma), size=xs.shape)
+        xs = np.clip(xs, x_left, x_right)
+
+    y_top = float(params.y_top)
+    if depth == depth_top:
+        ys = np.array([y_top - float(depth)], dtype=np.float64)
+    else:
+        ys = np.linspace(y_top - float(depth), y_top - float(depth_top), int(n_y))
+
+    keep_x, keep_y = [], []
+    for x in xs:
+        if mode == "downstream" and not (float(x) > float(geometry.x_c)):
+            continue
+        for y in ys:
+            pt = jnp.array([float(x), float(y)])
+            if bool(geometry.in_defect(pt)) or bool(geometry.in_cloak(pt)):
+                continue
+            keep_x.append(float(x))
+            keep_y.append(float(y))
+    if not keep_x:
+        raise RuntimeError(
+            f"All {n_x * len(ys)} band-grid eval points fall inside the "
+            f"cloak/defect footprint (depth={depth!r}, mode={mode!r}). "
+            f"Increase n_x/n_y, decrease depth, or widen the domain."
+        )
+    return (np.asarray(keep_x, dtype=np.float64),
+            np.asarray(keep_y, dtype=np.float64))
+
+
+def _interp_mag_on_mesh(mesh, mag_nodal: np.ndarray, xs, ys) -> np.ndarray:
+    """Linearly interpolate a nodal scalar (|u|) onto ``(xs, ys)`` using the
+    mesh's own TRI3 connectivity (exact P1 interpolation of the FEM field).
+
+    Returns a masked array: entries outside the triangulation (in the
+    defect hole or beyond the convex hull) are masked.
+    """
+    from matplotlib.tri import LinearTriInterpolator, Triangulation
+
+    pts = np.asarray(mesh.points)
+    cells = np.asarray(mesh.cells)
+    if cells.ndim != 2 or cells.shape[1] != 3:
+        raise ValueError(
+            f"area band metric requires a TRI3 mesh; got cells with shape "
+            f"{cells.shape} ({cells.shape[1] if cells.ndim == 2 else '?'} "
+            f"nodes/cell)."
+        )
+    tri = Triangulation(pts[:, 0], pts[:, 1], cells)
+    interp = LinearTriInterpolator(tri, np.asarray(mag_nodal))
+    return interp(np.asarray(xs), np.asarray(ys))
+
+
+def transmitted_band_metrics_fixed(
+    u_case: np.ndarray,
+    u_ref: np.ndarray,
+    case_mesh,
+    ref_mesh,
+    xs: np.ndarray,
+    ys: np.ndarray,
+) -> tuple[float, float]:
+    """Mesh-independent, area-weighted analogue of the ``magnitude_band_integral``
+    metrics, evaluated on the fixed grid from :func:`make_band_grid_eval_points`.
+
+    Interpolates ``|u_case|`` and ``|u_ref|`` onto ``(xs, ys)`` via each mesh's
+    P1 triangulation, then (over grid points valid in *both* meshes) returns::
+
+        ratio_area = <|u_case|> / <|u_ref|>
+        loss_area  = < (|u_case|/|u_ref| - 1)^2 >
+
+    Because the grid is uniform and shared across all meshes, the means are area
+    averages over the band (minus the cloak/defect footprint) and converge to a
+    single mesh-independent limit as the field converges. Returns ``(nan, nan)``
+    if no grid point is valid in both meshes.
+    """
+    case_at = _interp_mag_on_mesh(case_mesh, displacement_magnitude(u_case), xs, ys)
+    ref_at = _interp_mag_on_mesh(ref_mesh, displacement_magnitude(u_ref), xs, ys)
+    valid = ~(np.ma.getmaskarray(case_at) | np.ma.getmaskarray(ref_at))
+    if not np.any(valid):
+        return float("nan"), float("nan")
+    cv = np.asarray(case_at)[valid]
+    rv = np.asarray(ref_at)[valid]
+    ratio_area = float(np.mean(cv)) / (float(np.mean(rv)) + 1e-30)
+    loss_area = float(np.mean((cv / (rv + 1e-30) - 1.0) ** 2))
+    return ratio_area, loss_area
+
+
+def normalized_l2_mag_error_fixed(
+    u_case: np.ndarray,
+    u_ref: np.ndarray,
+    case_mesh,
+    ref_mesh,
+    xs: np.ndarray,
+    ys: np.ndarray,
+) -> float:
+    """Mesh-independent normalized L2 magnitude error on a fixed ``(xs, ys)`` grid::
+
+        sqrt( sum (|u_case| - |u_ref|)^2 / sum |u_ref|^2 )
+
+    Interpolates ``|u|`` onto the grid via each mesh's P1 triangulation (over
+    points valid in both). Unlike :func:`transmitted_band_metrics_fixed`'s
+    ``loss_area``, this is an *energy-normalized difference* (no per-point
+    division by ``|u_ref|``), so it is robust to reference near-zeros at
+    standing-wave nodes. Used for the out-of-band generalization metric (pass a
+    sub-surface validation grid) and any fixed-region L2 amplitude error.
+    Returns ``nan`` if no grid point is valid in both meshes.
+    """
+    case_at = _interp_mag_on_mesh(case_mesh, displacement_magnitude(u_case), xs, ys)
+    ref_at = _interp_mag_on_mesh(ref_mesh, displacement_magnitude(u_ref), xs, ys)
+    valid = ~(np.ma.getmaskarray(case_at) | np.ma.getmaskarray(ref_at))
+    if not np.any(valid):
+        return float("nan")
+    cv = np.asarray(case_at)[valid]
+    rv = np.asarray(ref_at)[valid]
+    num = float(np.sqrt(np.sum((cv - rv) ** 2)))
+    den = float(np.sqrt(np.sum(rv ** 2))) + 1e-30
+    return num / den
+
+
+def profile_error_surface_fixed(
+    u_case: np.ndarray,
+    u_ref: np.ndarray,
+    case_mesh,
+    ref_mesh,
+    x_positions: np.ndarray,
+    y_top: float,
+) -> float:
+    """Mesh-independent normalized L2 error of the free-surface magnitude
+    *profile* on a fixed set of x-positions::
+
+        sqrt( sum (|u_case| - |u_ref|)^2 / sum |u_ref|^2 )   at  (x, y_top)
+
+    Like :func:`transmitted_displacement_ratio_fixed`, ``|u|`` is interpolated
+    along each mesh's top-surface nodes (1-D, boundary-safe) rather than via the
+    2-D triangulation. Sensitive to profile-*shape* mismatch that the scalar
+    surface ratio averages away. Perfect cloak → 0.
+    """
+    case_xs, case_mag = _surface_mag_along_x(u_case, case_mesh, y_top)
+    ref_xs, ref_mag = _surface_mag_along_x(u_ref, ref_mesh, y_top)
+    case_at = np.interp(x_positions, case_xs, case_mag)
+    ref_at = np.interp(x_positions, ref_xs, ref_mag)
+    num = float(np.sqrt(np.sum((case_at - ref_at) ** 2)))
+    den = float(np.sqrt(np.sum(ref_at ** 2))) + 1e-30
+    return num / den
+
+
 def transmission_loss(
     u_cloak: jnp.ndarray,
     u_ref_surface: jnp.ndarray,

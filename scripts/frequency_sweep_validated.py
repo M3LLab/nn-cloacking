@@ -46,13 +46,14 @@ from jax_fem.solver import solver as jax_fem_solver
 
 from rayleigh_cloak import load_config
 from rayleigh_cloak.absorbing import make_xi_profile
+from rayleigh_cloak.cells import CellDecomposition
 from rayleigh_cloak.config import DerivedParams
 from rayleigh_cloak.loss import (
     find_embedded_eval_node_indices,
     make_fixed_surface_eval_points,
     transmitted_displacement_ratio,
 )
-from rayleigh_cloak.materials import C_iso
+from rayleigh_cloak.materials import C_iso, CellMaterial
 from rayleigh_cloak.mesh import extract_submesh, generate_mesh_full
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices
 from rayleigh_cloak.problem import RayleighCloakProblem, build_problem, _make_dirichlet_bc, _make_top_surface
@@ -250,16 +251,25 @@ def build_pixel_problem(
 # ── microstructure assembly ─────────────────────────────────────────
 
 
+# flat4 layout (rayleigh_cloak.materials.C_to_flatC):
+#   [ C[0,0,0,0],  C[1,1,1,1],  C[0,1,0,1],  C[0,0,1,1] ]  =  [ C11, C22, C66, C12 ].
+_FLAT4_DATASET_FIELDS = ("C11", "C22", "C66", "C12")
+
+
 def build_canvas(
     optimized_params_npz: Path,
     dataset_h5: Path,
     config_path: Path,
     rho_weight: float = 1.0,
-) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], tuple[float, float, float, float], dict]:
+):
     """Match cloak cells to dataset entries and build the tiled binary canvas.
 
     Mirrors ``scripts.vis.tile_matched_microstructure`` but returns the canvas
     in-memory rather than saving a PNG.
+
+    Matching feature space depends on ``n_C_params`` in the optimised params:
+        2 → (λ, μ, ρ)                3-D
+        4 → (C11, C22, C66, C12, ρ)  5-D, using dataset's orthotropic params.
 
     Returns
     -------
@@ -267,16 +277,17 @@ def build_canvas(
     (n_x, n_y) : macro-grid dimensions
     (H, W) : per-cell pixel dimensions (50, 50 from the CA dataset)
     cloak_bbox : (x_min, x_max, y_min, y_max) in physical coords
+    matched_cell_C_flat : (n_cells, n_C_params) — dataset entry's values on cloak
+        cells, optimiser's values elsewhere (background cement, no snapping).
+    matched_cell_rho : (n_cells,) — same convention.
     diag : misc stats for logging
     """
     npz = np.load(optimized_params_npz)
     cell_C_flat = npz["cell_C_flat"]
     cell_rho = npz["cell_rho"]
     n_cells, n_C = cell_C_flat.shape
-    if n_C != 2:
-        raise SystemExit(f"this script handles n_C_params=2; got {n_C}")
-    lam_q = cell_C_flat[:, 0]
-    mu_q = cell_C_flat[:, 1]
+    if n_C not in (2, 4):
+        raise SystemExit(f"this script handles n_C_params∈{{2, 4}}; got {n_C}")
 
     n_x, n_y = _resolve_grid(config_path, n_cells)
     cloak_mask, _centers, info = _build_cloak_mask(config_path, n_x, n_y)
@@ -286,19 +297,33 @@ def build_canvas(
     # Standardisation must match the optimisation-time GMM standardisation,
     # which used the dataset's own mean/std (not a stored .npz).
     with h5py.File(dataset_h5, "r") as f:
-        lam_ds = f["lambda_"][:]
-        mu_ds = f["mu"][:]
         rho_ds = f["rho"][:]
         H, W = f["cells"].shape[1:]
+        if n_C == 2:
+            lam_ds = f["lambda_"][:]
+            mu_ds = f["mu"][:]
+            X_ds = np.column_stack([lam_ds, mu_ds, rho_ds]).astype(np.float64)
+        else:  # n_C == 4
+            missing = [k for k in _FLAT4_DATASET_FIELDS if k not in f]
+            if missing:
+                raise SystemExit(
+                    f"{dataset_h5}: missing orthotropic fields {missing}. "
+                    "Run dataset/cellular_chiral/backfill_ortho_params.py first."
+                )
+            flat4_ds = np.column_stack([f[k][:] for k in _FLAT4_DATASET_FIELDS])
+            X_ds = np.column_stack([flat4_ds, rho_ds]).astype(np.float64)
 
-    X_ds = np.column_stack([lam_ds, mu_ds, rho_ds]).astype(np.float64)
     mean = X_ds.mean(axis=0)
     std = X_ds.std(axis=0)
     Xs_ds = (X_ds - mean) / std
-    Xs_ds[:, 2] *= rho_weight
+    Xs_ds[:, -1] *= rho_weight                    # ρ is always the last column
 
-    Xs_q = (np.column_stack([lam_q, mu_q, cell_rho])[cloak_indices] - mean) / std
-    Xs_q[:, 2] *= rho_weight
+    if n_C == 2:
+        X_q = np.column_stack([cell_C_flat[:, 0], cell_C_flat[:, 1], cell_rho])
+    else:
+        X_q = np.column_stack([cell_C_flat, cell_rho])
+    Xs_q = (X_q[cloak_indices] - mean) / std
+    Xs_q[:, -1] *= rho_weight
 
     # Brute-force NN — cheap at ~100 × 150k.
     a2 = np.sum(Xs_q ** 2, axis=1, keepdims=True)
@@ -310,7 +335,25 @@ def build_canvas(
     unique_idx, inverse = np.unique(cloak_match_idx, return_inverse=True)
     with h5py.File(dataset_h5, "r") as f:
         unique_geoms = f["cells"][unique_idx.tolist()]
+        if n_C == 2:
+            matched_cloak_C_flat = np.column_stack([
+                f["lambda_"][unique_idx.tolist()][inverse],
+                f["mu"][unique_idx.tolist()][inverse],
+            ])
+        else:
+            matched_cloak_C_flat = np.column_stack([
+                f[k][unique_idx.tolist()][inverse] for k in _FLAT4_DATASET_FIELDS
+            ])
+        matched_cloak_rho = f["rho"][unique_idx.tolist()][inverse]
     cloak_geoms = unique_geoms[inverse]
+
+    # Full (n_cells,…) matched arrays: cloak cells get the snapped dataset
+    # value; non-cloak cells keep the optimiser's value (cement background,
+    # no snapping). These feed the matched-homogenised sweep.
+    matched_cell_C_flat = np.array(cell_C_flat, dtype=np.float64, copy=True)
+    matched_cell_C_flat[cloak_indices] = matched_cloak_C_flat
+    matched_cell_rho = np.array(cell_rho, dtype=np.float64, copy=True)
+    matched_cell_rho[cloak_indices] = matched_cloak_rho
 
     # Outside-cloak macro cells: solid cement (canvas=1 → solid in PixelMaterialProblem).
     geoms = np.ones((n_cells, H, W), dtype=np.uint8)
@@ -324,8 +367,9 @@ def build_canvas(
         "match_d_mean": float(cloak_match_d.mean()),
         "match_d_max": float(cloak_match_d.max()),
         "n_unique_dataset_entries": int(unique_idx.size),
+        "n_C_params": int(n_C),
     }
-    return canvas, (n_x, n_y), (H, W), cloak_bbox, diag
+    return canvas, (n_x, n_y), (H, W), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag
 
 
 # ── frequency sweep helpers (mirror frequency_sweep.py) ─────────────
@@ -372,6 +416,57 @@ def _surface_indices_at_f(cloak_mesh, geometry, dp, kept_nodes, loss_cfg=None):
         cloak_mesh.points, geometry, dp.y_top, x_left, x_right,
     )
     return cs_idx, kept_nodes[cs_idx]
+
+
+def run_matched_homogenised_sweep(
+    base_config,
+    f_stars,
+    matched_cell_C_flat: np.ndarray,
+    matched_cell_rho: np.ndarray,
+    csv_path: Path,
+    solver_opts: dict,
+) -> None:
+    """Macro-level homogenised sweep using the *snapped* per-cell stiffness.
+
+    Each cloak macro cell carries the (λ, μ, ρ) or flat4 stiffness of its
+    nearest dataset entry instead of the optimiser's continuous output. The
+    delta versus the optimised sweep isolates the error introduced by snapping
+    to the dataset manifold; the further delta versus the pixel-level
+    validated sweep is the error of homogenisation itself.
+    """
+    print(f"\n>>> Matched homogenised sweep ({len(f_stars)} freqs)")
+
+    cell_C_flat_jnp = jnp.array(matched_cell_C_flat)
+    cell_rho_jnp = jnp.array(matched_cell_rho)
+    matched_params = (cell_C_flat_jnp, cell_rho_jnp)
+
+    ratios = []
+    for f_star in f_stars:
+        t0 = time.time()
+        print(f"  f* = {f_star:.2f} ", end="", flush=True)
+        config = _make_config_at_fstar(base_config, f_star, refinement_factor=None)
+        dp = DerivedParams.from_config(config)
+        geometry = _create_geometry(config, dp)
+
+        full_mesh = generate_mesh_full(config, dp, geometry)
+        cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
+
+        ref_result = solve_reference(config, mesh=full_mesh)
+
+        cell_decomp = CellDecomposition(geometry, config.cells.n_x, config.cells.n_y)
+        problem = build_problem(cloak_mesh, config, dp, geometry, cell_decomp)
+        problem.set_params(matched_params)
+        sol_list = jax_fem_solver(problem, solver_options=solver_opts)
+        u_val = np.asarray(sol_list[0])
+
+        cs_idx, rs_idx = _surface_indices_at_f(
+            cloak_mesh, geometry, dp, kept_nodes, loss_cfg=base_config.loss,
+        )
+        ratio = transmitted_displacement_ratio(u_val, ref_result.u, cs_idx, rs_idx)
+        print(f"ratio={ratio:.4f}  ({time.time()-t0:.1f}s)")
+        ratios.append(ratio)
+
+    _save_csv(csv_path, f_stars.tolist(), ratios)
 
 
 def run_validated_sweep(
@@ -425,8 +520,23 @@ _CASE_STYLES = {
     "obstacle":  {"color": "black", "ls": "--", "marker": "s", "label": "Obstacle"},
     "ideal":     {"color": "C3",    "ls": "-",  "marker": "o", "label": "Ideal Cloak"},
     "optimized": {"color": "C0",    "ls": "-",  "marker": "D", "label": "Optimized (homogenised)"},
+    "matched":   {"color": "C1",    "ls": "-",  "marker": "v", "label": "Matched (snapped homogenised)"},
     "validated": {"color": "C2",    "ls": "-",  "marker": "^", "label": "Validated (pixel-level)"},
 }
+
+
+def _load_comparison_module():
+    """Load ``scripts/vis/plot_frequency_sweep_comparison.py`` by path.
+
+    ``scripts/`` isn't an importable package, so we load the sibling vis module
+    explicitly rather than copying its annotated-plot logic here.
+    """
+    import importlib.util
+    mod_path = Path(__file__).resolve().parent / "vis" / "plot_frequency_sweep_comparison.py"
+    spec = importlib.util.spec_from_file_location("plot_frequency_sweep_comparison", mod_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def plot_results(case_csvs: dict[str, Path], out_path: Path) -> None:
@@ -492,7 +602,11 @@ def main() -> None:
     p.add_argument("--rho-weight", type=float, default=1.0,
                    help="Weight on standardised ρ in the matching distance.")
     p.add_argument("-f", "--force", action="store_true",
-                   help="Re-run solves even if frequency_sweep_validated.csv exists.")
+                   help="Re-run solves even if existing CSVs are present.")
+    p.add_argument("--no-matched", action="store_true",
+                   help="Skip the matched (snapped) homogenised sweep.")
+    p.add_argument("--no-validated", action="store_true",
+                   help="Skip the pixel-level validated sweep.")
     p.add_argument("-o", "--output-dir", default=None,
                    help="Output directory (default: <params dir>).")
     args = p.parse_args()
@@ -505,12 +619,13 @@ def main() -> None:
         "obstacle":  out_dir / "frequency_sweep_obstacle.csv",
         "ideal":     out_dir / "frequency_sweep_ideal.csv",
         "optimized": out_dir / "frequency_sweep_optimized.csv",
+        "matched":   out_dir / "frequency_sweep_matched.csv",
         "validated": out_dir / "frequency_sweep_validated.csv",
     }
 
     # ── build the canvas (matching) ─────────────────────────────────
     print("=== Matching cloak cells & assembling canvas ===")
-    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, diag = build_canvas(
+    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag = build_canvas(
         Path(args.params), Path(args.dataset), Path(args.config),
         rho_weight=args.rho_weight,
     )
@@ -519,35 +634,63 @@ def main() -> None:
         f"cloak cells: {diag['n_cloak']}/{diag['n_cells']}  "
         f"unique dataset entries used: {diag['n_unique_dataset_entries']}\n"
         f"match-distance (std-L2): median={diag['match_d_median']:.3f}, "
-        f"mean={diag['match_d_mean']:.3f}, max={diag['match_d_max']:.3f}"
+        f"mean={diag['match_d_mean']:.3f}, max={diag['match_d_max']:.3f}  "
+        f"(n_C_params={diag['n_C_params']})"
     )
 
-    # ── frequency sweep ─────────────────────────────────────────────
-    if csv_paths["validated"].exists() and not args.force:
-        print(f"validated CSV exists at {csv_paths['validated']}; skipping solves "
-              f"(use -f to overwrite).")
-    else:
-        solver_opts = {
-            "petsc_solver": {
-                "ksp_type": base_config.solver.ksp_type,
-                "pc_type": base_config.solver.pc_type,
-            }
+    solver_opts = {
+        "petsc_solver": {
+            "ksp_type": base_config.solver.ksp_type,
+            "pc_type": base_config.solver.pc_type,
         }
-        f_stars = np.arange(args.fmin, args.fmax + 0.5 * args.fstep, args.fstep)
+    }
+    f_stars = np.arange(args.fmin, args.fmax + 0.5 * args.fstep, args.fstep)
 
-        run_validated_sweep(
-            base_config=base_config,
-            f_stars=f_stars,
-            refinement_factor=args.refinement_factor,
-            canvas=canvas,
-            cloak_bbox=cloak_bbox,
-            void_ratio=args.void_ratio,
-            csv_path=csv_paths["validated"],
-            solver_opts=solver_opts,
-        )
+    # ── matched homogenised sweep ───────────────────────────────────
+    if not args.no_matched:
+        if csv_paths["matched"].exists() and not args.force:
+            print(f"matched CSV exists at {csv_paths['matched']}; skipping (use -f).")
+        else:
+            run_matched_homogenised_sweep(
+                base_config=base_config,
+                f_stars=f_stars,
+                matched_cell_C_flat=matched_cell_C_flat,
+                matched_cell_rho=matched_cell_rho,
+                csv_path=csv_paths["matched"],
+                solver_opts=solver_opts,
+            )
+
+    # ── pixel-level validated sweep ─────────────────────────────────
+    if not args.no_validated:
+        if csv_paths["validated"].exists() and not args.force:
+            print(f"validated CSV exists at {csv_paths['validated']}; skipping (use -f).")
+        else:
+            run_validated_sweep(
+                base_config=base_config,
+                f_stars=f_stars,
+                refinement_factor=args.refinement_factor,
+                canvas=canvas,
+                cloak_bbox=cloak_bbox,
+                void_ratio=args.void_ratio,
+                csv_path=csv_paths["validated"],
+                solver_opts=solver_opts,
+            )
 
     # Plot all available cases together.
     plot_results(csv_paths, out_dir / "frequency_sweep_validated.png")
+
+    # Annotated head-to-head comparison — only worth drawing when at least two
+    # of the directly-comparable cases (matched / optimized / validated) have a
+    # CSV present (whether produced just now or by a prior frequency_sweep.py run).
+    comparison_cases = ("optimized", "matched", "validated")
+    available = [c for c in comparison_cases if csv_paths[c].exists()]
+    if len(available) >= 2:
+        _load_comparison_module().plot_comparison(
+            out_dir, train_fstar=base_config.domain.f_star,
+        )
+    else:
+        print(f"comparison plot skipped: only {available} present "
+              f"(need ≥2 of {list(comparison_cases)}).")
 
 
 if __name__ == "__main__":

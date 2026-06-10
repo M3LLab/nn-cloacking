@@ -339,6 +339,10 @@ def solve_optimization_neural(
         n_fourier=neural_cfg.n_fourier,
         seed=neural_cfg.seed,
         output_scale=neural_cfg.output_scale,
+        constrained=neural_cfg.constrained,
+        kappa=neural_cfg.kappa,
+        cap_anisotropy=neural_cfg.cap_anisotropy,
+        anisotropy_ratio=neural_cfg.anisotropy_ratio,
     )
     loaded_opt_state = None
     if neural_cfg.init_weights:
