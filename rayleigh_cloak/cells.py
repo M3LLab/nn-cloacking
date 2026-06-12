@@ -95,17 +95,28 @@ class CellDecomposition:
             return ix * self.n_y + iy
         return self.n_cells  # sentinel → background
 
-    def build_qp_mapping(self, physical_quad_points: np.ndarray) -> np.ndarray:
+    def build_qp_mapping(
+        self, physical_quad_points: np.ndarray, confine_to_cloak: bool = False,
+    ) -> np.ndarray:
         """Precompute FEM-quadrature-point → cell-index mapping.
 
         Parameters
         ----------
         physical_quad_points : (n_fem_cells, n_qp, 2)
+        confine_to_cloak : bool
+            If True, also send any quadrature point that is *not* inside the
+            cloak annulus (per-point ``geometry.in_cloak`` test) to the
+            background sentinel, even when it falls inside a cloak cell's grid
+            footprint. Default False keeps the legacy cell-centre masking (a
+            cloak cell's material fills its whole rectangular grid cell). Needed
+            for coarse grids (esp. 1x1) where a cell footprint spills outside the
+            triangular annulus into the bulk half-space.
 
         Returns
         -------
         qp_to_cell : (n_fem_cells, n_qp) int array.
-            Sentinel value ``n_cells`` for points outside the cell grid.
+            Sentinel value ``n_cells`` for points outside the cell grid (and,
+            when ``confine_to_cloak``, outside the cloak annulus).
         """
         pts = np.asarray(physical_quad_points)
         n_fem, n_qp, _ = pts.shape
@@ -117,7 +128,11 @@ class CellDecomposition:
         idx = ix * self.n_y + iy
 
         outside = (ix < 0) | (ix >= self.n_x) | (iy < 0) | (iy >= self.n_y)
-        idx[outside] = self.n_cells  # sentinel
+        if confine_to_cloak:
+            # Per-point annulus test (in_cloak expects (2, N): x[0]=xs, x[1]=ys).
+            in_annulus = np.asarray(self.geometry.in_cloak(flat.T), dtype=bool)
+            outside = outside | ~in_annulus
+        idx[outside] = self.n_cells  # sentinel → background
 
         return idx.reshape(n_fem, n_qp)
 

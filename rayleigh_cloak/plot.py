@@ -493,6 +493,11 @@ def _plot_field_on_phys_domain(
         # Re-index the connectivity into the physical-domain submask so the
         # cut-out cloak void is preserved as a hole.
         cells = np.asarray(cells)
+        # For quadratic (TRI6) meshes, matplotlib's Triangulation needs the
+        # 3-node corner connectivity; the midside nodes are not triangulation
+        # vertices (the |u| contour is a P1 plot of the corner values).
+        if cells.ndim == 2 and cells.shape[1] > 3:
+            cells = cells[:, :3]
         new_index = -np.ones(pts_x.shape[0], dtype=np.int64)
         new_index[np.where(phys)[0]] = np.arange(int(phys.sum()))
         cell_keep = phys[cells].all(axis=1)
@@ -595,14 +600,18 @@ def plot_step_field(
     )
 
 
-def plot_reference_field(
-    ref_result: SolutionResult,
+def plot_field_panels(
+    u: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
     save_path: str,
-    title: str = "Reference field |u|",
+    title: str = "|u|",
     percentile: float = 95,
     norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
 ) -> None:
-    """Save four diagnostic panels for a reference (uncloaked) solve.
+    """Save four void-aware diagnostic panels for one displacement solution.
 
     Files written next to ``save_path`` (suffix on the filename stem):
 
@@ -612,24 +621,19 @@ def plot_reference_field(
       * ``'_re_mag'``  — ``sqrt(Re(u_x)^2 + Re(u_y)^2)``, the
         in-phase real-displacement snapshot
 
-    The Re(u) panels expose the propagating wave that the envelope
-    plot hides.
+    Pass ``cells`` (the mesh connectivity) so a cut-out cloak void is
+    preserved as a hole instead of being filled by Delaunay triangulation.
+    Shared by :func:`plot_reference_field` and the forward-solve CLI (``run.py``).
     """
-    pts = np.asarray(ref_result.mesh.points)
-    cells = np.asarray(ref_result.mesh.cells)
-    pts_x = pts[:, 0]
-    pts_y = pts[:, 1]
-    params = ref_result.params
-
     plot_displacement_field(
-        ref_result.u, pts_x, pts_y, params,
+        u, pts_x, pts_y, params,
         save_path=save_path, title=title,
         percentile=percentile, norm_type=norm_type, cells=cells,
     )
 
     root, ext = os.path.splitext(save_path)
-    re_ux = ref_result.u[:, 0]
-    re_uy = ref_result.u[:, 1]
+    re_ux = u[:, 0]
+    re_uy = u[:, 1]
     re_mag = np.sqrt(re_ux ** 2 + re_uy ** 2)
 
     panels = (
@@ -646,6 +650,27 @@ def plot_reference_field(
             percentile=percentile, norm_type=norm_type, cells=cells,
             symmetric=sym,
         )
+
+
+def plot_reference_field(
+    ref_result: SolutionResult,
+    save_path: str,
+    title: str = "Reference field |u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+) -> None:
+    """Save four diagnostic panels for a reference (uncloaked) solve.
+
+    Thin wrapper over :func:`plot_field_panels` that pulls the node
+    coordinates and connectivity from ``ref_result``.
+    """
+    pts = np.asarray(ref_result.mesh.points)
+    cells = np.asarray(ref_result.mesh.cells)
+    plot_field_panels(
+        ref_result.u, pts[:, 0], pts[:, 1], ref_result.params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
 
 
 def plot_results(result: SolutionResult, percentile: float = 95,

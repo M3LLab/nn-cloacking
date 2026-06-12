@@ -20,6 +20,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from rayleigh_cloak.cells import CellDecomposition
+from rayleigh_cloak.loss import transmitted_displacement_ratio
 from rayleigh_cloak.material_prior import GMMPrior, gmm_flat_top_penalty
 from rayleigh_cloak.optimize import (
     AdamState,
@@ -336,6 +337,7 @@ class NeuralOptimizationResult:
     loss_history: list[float] = field(default_factory=list)
     cloak_history: list[float] = field(default_factory=list)
     l2_history: list[float] = field(default_factory=list)
+    transmission_history: list[float] = field(default_factory=list)
 
 
 def run_optimization_neural(
@@ -358,6 +360,9 @@ def run_optimization_neural(
     gmm_prior: GMMPrior | None = None,
     lambda_gmm: float = 0.0,
     n_C_params: int = 2,
+    u_ref_full: np.ndarray | None = None,
+    trans_surface_case: np.ndarray | None = None,
+    trans_surface_ref: np.ndarray | None = None,
 ) -> NeuralOptimizationResult:
     """Run optimization over MLP weights (neural reparameterization).
 
@@ -370,9 +375,16 @@ def run_optimization_neural(
     theta_init : initial MLP weights
     opt_state_init : if provided, resume Adam from this state (warm restart)
     step_callback : optional callable(step, total, cloak, l2, neighbor, params)
-        Same signature as raw optimization for compatibility.
+        Same signature as raw optimization for compatibility, plus a
+        ``transmission_ratio`` keyword when the metric is available.
     loss_fn : optional callable(u_cloak, u_ref, indices) -> scalar
         JAX-traceable cloaking loss. Defaults to ``cloaking_loss`` (relative L2).
+    u_ref_full, trans_surface_case, trans_surface_ref : optional
+        Reference displacement field and the (case, reference) node indices of
+        the free surface beyond the cloak. When all three are given, the
+        transmitted-displacement ratio (``→1`` is a perfect cloak) is evaluated
+        every step — for free, from the field the gradient solve already
+        produces — then printed and forwarded to ``step_callback``.
     """
     if loss_fn is None:
         loss_fn = cloaking_loss
@@ -383,6 +395,7 @@ def run_optimization_neural(
     loss_history: list[float] = []
     cloak_history: list[float] = []
     l2_history: list[float] = []
+    transmission_history: list[float] = []
 
     best_loss = float("inf")
     best_theta = jax.tree.map(jnp.copy, theta)
@@ -404,11 +417,17 @@ def run_optimization_neural(
                 cell_C, cell_rho, reparam.cloak_mask, gmm_prior, n_C_params
             )
             total = total + lambda_gmm * L_gmm
-        return total, L_cloak
+        # Return the forward field as aux so the transmission-ratio metric can
+        # be evaluated each step without a second solve (the gradient is taken
+        # w.r.t. ``total`` only — aux outputs do not enter the derivative).
+        return total, u_cloak
 
-    loss_and_grad = jax.value_and_grad(
-        lambda t: _loss_fn(t)[0],
-        has_aux=False,
+    loss_and_grad = jax.value_and_grad(_loss_fn, has_aux=True)
+
+    track_transmission = (
+        u_ref_full is not None
+        and trans_surface_case is not None
+        and trans_surface_ref is not None
     )
 
     # Separate function to get cloak loss (no extra cost — we decompose from total)
@@ -433,7 +452,7 @@ def run_optimization_neural(
         else:
             cur_lr = lr + (lr_end - lr) * t_frac
 
-        loss_val, grads = loss_and_grad(theta)
+        (loss_val, u_cloak), grads = loss_and_grad(theta)
         loss_val_float = float(loss_val)
         loss_history.append(loss_val_float)
 
@@ -442,13 +461,26 @@ def run_optimization_neural(
         cloak_history.append(L_cloak)
         l2_history.append(L_l2)
 
+        # Transmission ratio (independent quality metric, →1 is perfect) from
+        # the field the gradient solve already produced — no extra solve.
+        transmission_ratio = None
+        if track_transmission:
+            transmission_ratio = transmitted_displacement_ratio(
+                np.asarray(u_cloak), u_ref_full,
+                trans_surface_case, trans_surface_ref,
+            )
+            transmission_history.append(transmission_ratio)
+
         grad_norm = float(jnp.sqrt(sum(
             jnp.sum(l["W"]**2) + jnp.sum(l["b"]**2) for l in grads
         )))
         gmm_str = f"  GMM = {L_gmm:.4e}" if use_gmm else ""
+        trans_str = (f"  trans_ratio = {transmission_ratio:.4f}"
+                     if transmission_ratio is not None else "")
         print(
             f"  Step {step:4d} | total = {loss_val_float:.4e}"
             f"  cloak_pct = {np.sqrt(max(L_cloak, 0)) * 100:.2f}"
+            f"{trans_str}"
             f"  L2 = {L_l2:.4e}"
             f"{gmm_str}"
             f"  lr={cur_lr:.2e}"
@@ -461,7 +493,9 @@ def run_optimization_neural(
 
         if step_callback is not None:
             params = reparam.decode(theta)
-            step_callback(step, loss_val_float, L_cloak, L_l2, 0.0, params, theta=theta, opt_state=opt_state)
+            step_callback(step, loss_val_float, L_cloak, L_l2, 0.0, params,
+                          theta=theta, opt_state=opt_state,
+                          transmission_ratio=transmission_ratio)
 
         if plot_callback is not None and step % plot_every == 0:
             params = reparam.decode(theta)
@@ -486,6 +520,7 @@ def run_optimization_neural(
         loss_history=loss_history,
         cloak_history=cloak_history,
         l2_history=l2_history,
+        transmission_history=transmission_history,
     )
 
 

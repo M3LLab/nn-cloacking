@@ -128,13 +128,26 @@ def main(config_path: str = "configs/cell_based.yaml") -> None:
     loss_csv = out / "loss_history.csv"
     csv_file = open(loss_csv, "w")
     method = config.optimization.method
+    n_x = config.cells.n_x
+    n_y = config.cells.n_y
+    n_C_params = config.cells.n_C_params
+    # For a single-cell (1x1) run, also log the decoded C-tensor components +
+    # rho each step so the optimisation trajectory / basins can be reconstructed
+    # and visualised afterwards (appended after transmission_ratio so existing
+    # column positions are unchanged).
+    log_cell_C = method != "neural_topo" and n_x * n_y == 1
+    _c_names = (["C11", "C22", "C66", "C12"] if n_C_params == 4
+                else [f"C{i}" for i in range(n_C_params)])
     if method == "neural_topo":
         csv_file.write(
             "step,total,cloak,l2_reg,neighbor,"
-            "n_solid,lam_rel_err,mu_rel_err,rho_rel_err,avg_rho_void\n"
+            "n_solid,lam_rel_err,mu_rel_err,rho_rel_err,avg_rho_void,"
+            "transmission_ratio\n"
         )
     else:
-        csv_file.write("step,total,cloak,l2_reg,neighbor\n")
+        extra = ("," + ",".join(_c_names) + ",rho") if log_cell_C else ""
+        csv_file.write(
+            "step,total,cloak,l2_reg,neighbor,transmission_ratio" + extra + "\n")
     csv_file.flush()
 
     best_loss = float("inf")
@@ -142,22 +155,28 @@ def main(config_path: str = "configs/cell_based.yaml") -> None:
     profile_dir = out / "profiles"
     if plot_every > 0:
         profile_dir.mkdir(exist_ok=True)
-    n_x = config.cells.n_x
-    n_y = config.cells.n_y
-    n_C_params = config.cells.n_C_params
 
-    def _log_step(step, total, cloak, l2, neighbor, params, mat_metrics=None, theta=None, opt_state=None):
+    def _log_step(step, total, cloak, l2, neighbor, params, mat_metrics=None,
+                  theta=None, opt_state=None, transmission_ratio=None):
         nonlocal best_loss
+        tr = "nan" if transmission_ratio is None else f"{transmission_ratio:.6f}"
         if mat_metrics is not None:
             csv_file.write(
                 f"{step},{total:.8e},{cloak:.8e},{l2:.8e},{neighbor:.8e},"
                 f"{mat_metrics['n_solid']},{mat_metrics['lam_rel_err']:.6f},"
                 f"{mat_metrics['mu_rel_err']:.6f},"
                 f"{mat_metrics['rho_rel_err']:.6f},"
-                f"{mat_metrics['avg_rho_void']:.6f}\n"
+                f"{mat_metrics['avg_rho_void']:.6f},{tr}\n"
             )
         else:
-            csv_file.write(f"{step},{total:.8e},{cloak:.8e},{l2:.8e},{neighbor:.8e}\n")
+            row = (f"{step},{total:.8e},{cloak:.8e},{l2:.8e},"
+                   f"{neighbor:.8e},{tr}")
+            if log_cell_C:
+                cC, cR = params
+                cC = np.asarray(cC).reshape(-1)[:n_C_params]
+                cR = float(np.asarray(cR).reshape(-1)[0])
+                row += "," + ",".join(f"{v:.8e}" for v in cC) + f",{cR:.8e}"
+            csv_file.write(row + "\n")
         csv_file.flush()
         if total < best_loss:
             best_loss = total
@@ -167,7 +186,10 @@ def main(config_path: str = "configs/cell_based.yaml") -> None:
                      cell_rho=np.asarray(cell_rho))
             if theta is not None:
                 save_theta(theta, str(out / "best_weights.npz"), opt_state=opt_state)
-            print(f"    ✓ New best loss {total:.4e} at step {step}, saved params")
+            tr_msg = ("" if transmission_ratio is None
+                      else f", transmission_ratio {transmission_ratio:.4f}")
+            print(f"    ✓ New best loss {total:.4e} at step {step}{tr_msg}, "
+                  f"saved params")
 
         if plot_every > 0 and step % plot_every == 0:
             cell_C_flat, cell_rho = params

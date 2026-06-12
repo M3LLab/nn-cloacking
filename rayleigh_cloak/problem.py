@@ -36,6 +36,7 @@ class RayleighCloakProblem(Problem):
         C0 = self._C0
         rho0 = self._rho0
         is_ref = self._is_reference
+        symmetrize = getattr(type(self), '_symmetrize_cloak', False)
         xi_fn = type(self).__dict__['_xi_fn']
 
         if is_ref:
@@ -46,7 +47,7 @@ class RayleighCloakProblem(Problem):
                 return rho0
         else:
             def _C_eff_pt(x):
-                return C_eff(x, geo, C0)
+                return C_eff(x, geo, C0, symmetrize=symmetrize)
 
             def _rho_eff_pt(x):
                 return rho_eff(x, geo, rho0)
@@ -58,8 +59,12 @@ class RayleighCloakProblem(Problem):
         cell_decomp = getattr(type(self), '_cell_decomp', None)
         if cell_decomp is not None:
             import numpy as np
+            confine = getattr(type(self), '_confine_to_cloak', False)
             self._qp_to_cell = jnp.array(
-                cell_decomp.build_qp_mapping(np.asarray(self.physical_quad_points))
+                cell_decomp.build_qp_mapping(
+                    np.asarray(self.physical_quad_points),
+                    confine_to_cloak=confine,
+                )
             )
 
         self.internal_vars = [
@@ -255,6 +260,7 @@ def build_problem(
         "_omega":        params.omega,
         "_geometry":     geometry,
         "_is_reference": cfg.is_reference,
+        "_symmetrize_cloak": cfg.symmetrize_cloak,
         "_C0":           C0,
         "_rho0":         params.rho0,
         "_xi_fn":        make_xi_profile(params),
@@ -262,6 +268,7 @@ def build_problem(
         "_sigma_src":    params.sigma_src,
         "_F0":           params.F0,
         "_cell_decomp":  cell_decomp,
+        "_confine_to_cloak": cfg.cells.confine_to_cloak,
         "_n_C_params":   n_C_params_override or cfg.cells.n_C_params,
         "_source_type":  cfg.source.source_type,
         "_wave_type":    cfg.source.wave_type,

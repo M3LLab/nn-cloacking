@@ -84,6 +84,14 @@ class MeshConfig(BaseModel):
     # defect-cutout path silently ignores it.
     embed_macro_grid: bool = False
     ele_type: str = "TRI3"
+    # Mesh builder selection. "legacy" (default) uses the graded
+    # Distance->Threshold cloak refinement in ``rayleigh_cloak.mesh`` and is
+    # bit-for-bit unchanged. "uniform_tri6" uses ``rayleigh_cloak.mesh_uniform``:
+    # a uniform element size across the whole cloak bounding box (one size per
+    # macro cell) instead of a graded field, intended together with
+    # ``ele_type: TRI6`` (quadratic) for low-dispersion macro solves. The
+    # builder honours ``ele_type`` for both TRI3 and TRI6.
+    builder: Literal["legacy", "uniform_tri6"] = "legacy"
 
 
 class SourceConfig(BaseModel):
@@ -118,6 +126,14 @@ class CellConfig(BaseModel):
     # `python -m dataset.cellular_chiral.fit_gmm` (its `feature_mean` field is
     # the centroid).
     init_path: str | None = None
+    # When True, a quadrature point receives a cell's optimised material ONLY if
+    # the point itself lies in the cloak annulus (per-point ``in_cloak`` test);
+    # points outside the annulus get the background material even inside a cloak
+    # cell's grid footprint. Default False keeps the legacy cell-centre masking
+    # (material fills each cloak cell's whole grid cell). Set True for coarse
+    # grids (esp. 1x1) where a cell's bbox footprint spills far outside the
+    # triangular annulus into the bulk half-space.
+    confine_to_cloak: bool = False
 
     @model_validator(mode="after")
     def _check_pushforward_only_fields(self) -> "CellConfig":
@@ -334,6 +350,15 @@ class NassarConfig(BaseModel):
 class SimulationConfig(BaseModel):
     is_reference: bool = False
     geometry_type: str = "triangular"
+    # When True (continuous, non-reference, non-cell forward solve), the
+    # transformation-elasticity stiffness C_eff is symmetrised inside the cloak
+    # using the augmented-Voigt recipe (``materials.symmetrize_stiffness``)
+    # before solving — i.e. the *ideal* cloak material, but made minor-symmetric
+    # (Cauchy) so it is realisable by a classical (non-Cosserat) medium. Default
+    # False keeps the exact (asymmetric) push-forward. Has no effect when
+    # ``is_reference`` or ``cells.enabled`` is True (cells use
+    # ``cells.symmetrize_init`` instead).
+    symmetrize_cloak: bool = False
 
     material: MaterialConfig = MaterialConfig()
     domain: DomainConfig = DomainConfig()

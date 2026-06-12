@@ -48,7 +48,22 @@ from rayleigh_cloak.loss import (                                # noqa: E402
     transmitted_displacement_ratio_fixed,
 )
 from rayleigh_cloak.materials import C_iso, CellMaterial  # noqa: E402
-from rayleigh_cloak.mesh import extract_submesh, generate_mesh_full  # noqa: E402
+from rayleigh_cloak import mesh as _legacy_mesh        # noqa: E402
+from rayleigh_cloak import mesh_uniform as _uniform_mesh  # noqa: E402
+from rayleigh_cloak.mesh import extract_submesh         # noqa: E402
+
+# (builder_name -> (mesh.builder, mesh.ele_type)) for the element-type sweep.
+# "legacy_tri3" reproduces the historical TRI3 graded-refinement benchmark;
+# "uniform_tri6" exercises the new uniform-in-cloak quadratic builder.
+_BUILDER_SPECS = {
+    "legacy_tri3":  ("legacy", "TRI3"),
+    "uniform_tri3": ("uniform_tri6", "TRI3"),  # uniform sizing, linear elements
+    "uniform_tri6": ("uniform_tri6", "TRI6"),
+}
+
+
+def _builder_module(builder: str):
+    return _uniform_mesh if builder == "uniform_tri6" else _legacy_mesh
 from rayleigh_cloak.neural_reparam import load_theta, make_neural_reparam  # noqa: E402
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices  # noqa: E402
 from rayleigh_cloak.problem import build_problem     # noqa: E402
@@ -71,6 +86,8 @@ def _make_config(
     eval_noise_sigma: float | None = None,
     eval_noise_seed: int | None = None,
     embed_macro_grid: bool | None = None,
+    builder: str | None = None,
+    ele_type: str | None = None,
 ):
     loss_updates = {}
     if n_eval_points is not None:
@@ -85,6 +102,10 @@ def _make_config(
     }
     if embed_macro_grid is not None:
         mesh_updates["embed_macro_grid"] = bool(embed_macro_grid)
+    if builder is not None:
+        mesh_updates["builder"] = str(builder)
+    if ele_type is not None:
+        mesh_updates["ele_type"] = str(ele_type)
     update = {
         "domain": base_config.domain.model_copy(update={"f_star": float(f_star)}),
         "mesh":   base_config.mesh.model_copy(update=mesh_updates),
@@ -149,6 +170,131 @@ def _mesh_resolution_stats(mesh):
     return float(h_e.min()), float(h_e.mean()), float(h_e.max())
 
 
+class _Tri3View:
+    """A lightweight TRI3 'view' of a (possibly TRI6) mesh for the fixed-grid
+    metrics, which require 3-node connectivity (``loss._interp_mag_on_mesh``).
+
+    For a TRI6 mesh each quadratic triangle ``[c0,c1,c2,m01,m12,m20]`` is split
+    into 4 linear sub-triangles using its own midside nodes::
+
+        [c0, m01, m20]  [m01, c1, m12]  [m20, m12, c2]  [m01, m12, m20]
+
+    The node array is unchanged, so the per-node ``|u|`` (including midside
+    values) is interpolated exactly — this is the P1 interpolant on the
+    quadratic node set, the natural mesh-independent reading of a TRI6 field.
+    A TRI3 mesh is returned unchanged.
+    """
+
+    __slots__ = ("points", "cells", "ele_type")
+
+    def __init__(self, mesh):
+        cells = np.asarray(mesh.cells)
+        self.points = np.asarray(mesh.points)
+        if cells.ndim == 2 and cells.shape[1] == 6:
+            c0, c1, c2, m01, m12, m20 = (cells[:, i] for i in range(6))
+            self.cells = np.concatenate([
+                np.stack([c0, m01, m20], axis=1),
+                np.stack([m01, c1, m12], axis=1),
+                np.stack([m20, m12, c2], axis=1),
+                np.stack([m01, m12, m20], axis=1),
+            ], axis=0)
+            self.ele_type = "TRI3"
+        else:
+            self.cells = cells
+            self.ele_type = getattr(mesh, "ele_type", "TRI3")
+
+
+def _tri3_view(mesh):
+    """Return ``mesh`` if already TRI3, else a :class:`_Tri3View` (4-split)."""
+    cells = np.asarray(mesh.cells)
+    if cells.ndim == 2 and cells.shape[1] == 3:
+        return mesh
+    return _Tri3View(mesh)
+
+
+def plot_builder_overlay(all_rows, save_path, title: str | None = None):
+    """Overlay fixed-grid convergence metrics vs cells, one curve per builder.
+
+    Used when more than one ``--builders`` entry is swept: it shows the
+    legacy-TRI3 and uniform-TRI6 curves converging to the *same* limit (and
+    TRI6 reaching it at fewer cells). Only ``status == 'ok'`` rows are used.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [r for r in all_rows if r.get("status") == "ok"]
+    if not rows:
+        return None
+    builders = sorted({r.get("builder", "?") for r in rows})
+    cmap = plt.get_cmap("tab10")
+    colors = {b: cmap(i % 10) for i, b in enumerate(builders)}
+
+    panels = [
+        ("ratio", "ratio (surface)", False),
+        ("ratio_area", "ratio_area (band, mesh-indep)", False),
+        ("loss_area", "loss_area (band, mesh-indep)", True),
+        ("profile_error_surface", "profile_error_surface", True),
+        ("outside_band_mag_error", "outside_band_mag_error", True),
+        ("ppw", "elements per wavelength", False),
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    for ax, (key, ylabel, logy) in zip(axes.ravel(), panels):
+        for b in builders:
+            br = sorted(
+                (r for r in rows if r.get("builder") == b),
+                key=lambda r: float(r["cells"]),
+            )
+            xs = [float(r["cells"]) for r in br]
+            ys = [float(r[key]) for r in br]
+            ax.plot(xs, ys, "o-", color=colors[b], label=b)
+        ax.set_xlabel("cells (physical mesh)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(ylabel)
+        ax.set_xscale("log")
+        if logy:
+            ax.set_yscale("log")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=9)
+    fig.suptitle(
+        (title or "builder overlay") + " — TRI3 vs TRI6 convergence", fontsize=14)
+    fig.tight_layout()
+    save_path = Path(save_path)
+    fig.savefig(save_path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    return save_path
+
+
+def _print_grids(rows, cloaks, outsides, header: str) -> None:
+    """Print the per-(cloak,outside) metric grids for one builder's rows."""
+    by_pair = {(r["rf_cloak"], r["rf_outside"]): r for r in rows}
+
+    def g(name, key, fmt):
+        print(_format_grid(
+            name, cloaks, outsides,
+            {k: (fmt(v[key]) if v["status"] == "ok" else "FAIL")
+             for k, v in by_pair.items()},
+        ))
+        print()
+
+    print(f"\n=== {header} ===")
+    g("u_ratio", "ratio", lambda x: f"{x:.4f}")
+    g("ratio_depth", "ratio_depth", lambda x: f"{x:.4f}")
+    g("loss", "loss", lambda x: f"{x:.3e}")
+    g("ratio_area", "ratio_area", lambda x: f"{x:.4f}")
+    g("loss_area", "loss_area", lambda x: f"{x:.3e}")
+    g("gap_loss", "gap_loss", lambda x: f"{x:.3e}")
+    g("out_band_err", "outside_band_mag_error", lambda x: f"{x:.4f}")
+    g("ppw", "ppw", lambda x: f"{x:.1f}")
+    g("cells", "cells", lambda x: f"{x:>7}")
+    # cost grids include failed points too
+    print(_format_grid("wall_s", cloaks, outsides,
+          {k: f"{v['wall_s']:.1f}" for k, v in by_pair.items()}))
+    print()
+    print(_format_grid("rss_gb", cloaks, outsides,
+          {k: f"{v['peak_rss_gb']:.2f}" for k, v in by_pair.items()}))
+
+
 def _format_grid(metric_name: str, cloaks, outsides, grid: dict[tuple, str]) -> str:
     col_w = max(8, max(len(g) for g in grid.values()) + 1)
     head = f"{metric_name:>16}  " + "  ".join(f"out={o:>5}".rjust(col_w) for o in outsides)
@@ -170,6 +316,7 @@ def _read_csv_rows(csv_path) -> list[dict]:
     with open(csv_path, newline="") as fh:
         for r in csv.DictReader(fh):
             rows.append({
+                "builder":     r.get("builder", "legacy_tri3"),
                 "rf_cloak":    float(r["rf_cloak"]),
                 "rf_outside":  float(r["rf_outside"]),
                 "nodes":       int(r["nodes"]),
@@ -236,7 +383,7 @@ def _conv_panel(ax, rows, outsides, colors, ykey, ylabel, title,
     ax.legend(fontsize=8)
 
 
-def plot_results(csv_path, save_path=None, title: str | None = None):
+def plot_results(csv_path, save_path=None, title: str | None = None, rows=None):
     """Plot a mesh-convergence sweep CSV into TWO figures (one line per outside
     refinement factor), so panels stay large enough to read:
 
@@ -256,7 +403,8 @@ def plot_results(csv_path, save_path=None, title: str | None = None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    rows = [r for r in _read_csv_rows(csv_path) if r["status"] == "ok"]
+    src_rows = rows if rows is not None else _read_csv_rows(csv_path)
+    rows = [r for r in src_rows if r["status"] == "ok"]
     if not rows:
         raise ValueError(f"no successful (status==ok) rows in {csv_path}")
 
@@ -387,6 +535,142 @@ def _load_opt_params(params_path: str, base_config):
     return cell_C_flat, cell_rho
 
 
+def _run_sweep_point(base_config, args, opt_params, solver_opts,
+                     c, o, bname, mbuilder, etype) -> dict:
+    """Solve one (builder, cloak-rf, outside-rf) sweep point; return a CSV row.
+
+    Identical to the legacy per-point body, but (a) the mesh is built by the
+    selected builder (``mbuilder``/``etype``) and (b) the mesh-independent
+    fixed-grid metrics receive TRI3 views (``_tri3_view``) so they work for
+    TRI6 meshes. ``status == 'ok'`` rows carry the metrics; failures carry nan.
+    """
+    cfg = _make_config(
+        base_config, args.f_star, c, o,
+        n_eval_points=args.n_eval_points,
+        eval_noise_sigma=args.eval_noise_sigma,
+        eval_noise_seed=args.eval_noise_seed,
+        embed_macro_grid=(True if args.embed_macro_grid else None),
+        builder=mbuilder, ele_type=etype,
+    )
+    dp = DerivedParams.from_config(cfg)
+    geometry = _create_geometry(cfg, dp)
+    cell_decomp = CellDecomposition(
+        geometry, base_config.cells.n_x, base_config.cells.n_y,
+    )
+
+    eval_xs = None
+    if cfg.loss.n_eval_points > 0:
+        eval_xs = make_fixed_surface_eval_points(
+            geometry, dp, cfg.loss.n_eval_points,
+            cfg.loss.eval_noise_sigma, cfg.loss.eval_noise_seed,
+        )
+    band_xs, band_ys = make_band_grid_eval_points(
+        geometry, dp, depth=cfg.loss.depth,
+        n_x=args.band_nx, n_y=args.band_ny, mode=cfg.loss.band_x_filter,
+    )
+    surf_xs, _ = make_band_grid_eval_points(
+        geometry, dp, depth=0.0, n_x=args.band_nx, n_y=1,
+        mode=cfg.loss.band_x_filter,
+    )
+    obd = float(args.outside_band_depth)
+    if obd > float(cfg.loss.depth) and obd < float(dp.H):
+        outb_xs, outb_ys = make_band_grid_eval_points(
+            geometry, dp, depth=obd, depth_top=float(cfg.loss.depth),
+            n_x=args.band_nx, n_y=args.band_ny, mode=cfg.loss.band_x_filter,
+        )
+    else:
+        outb_xs = outb_ys = None
+    lambda_min = float(2.0 * np.pi * dp.cR / dp.omega)
+
+    t0 = time.time()
+    try:
+        full_mesh = _builder_module(mbuilder).generate_mesh_full(cfg, dp, geometry)
+        cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
+        # TRI3 views for the fixed-grid (P1-interpolation) metrics; identity
+        # for a real TRI3 mesh, 4-split for a TRI6 mesh.
+        cm_view = _tri3_view(cloak_mesh)
+        fm_view = _tri3_view(full_mesh)
+        n_nodes = len(cloak_mesh.points)
+        n_cells = int(cloak_mesh.cells.shape[0])
+        print(
+            f"  [{bname}] rf_cloak={c:>5}  rf_out={o:>5}  "
+            f"nodes={n_nodes:>7}  cells={n_cells:>8}  ...",
+            end="", flush=True,
+        )
+
+        ref_result = solve_reference(cfg, mesh=full_mesh)
+        problem = build_problem(cloak_mesh, cfg, dp, geometry, cell_decomp)
+        problem.set_params(opt_params)
+        sol_list = jax_fem.solver.solver(problem, solver_options=solver_opts)
+        u_opt = np.asarray(sol_list[0])
+        if eval_xs is not None:
+            ratio = transmitted_displacement_ratio_fixed(
+                u_opt, ref_result.u, cm_view, fm_view, eval_xs, dp.y_top,
+            )
+        else:
+            cs_idx, rs_idx = _surface_indices_at_f(cloak_mesh, geometry, dp, kept_nodes)
+            ratio = float(transmitted_displacement_ratio(u_opt, ref_result.u, cs_idx, rs_idx))
+        ratio_depth, loss = _depth_band_metrics(
+            u_opt, ref_result.u, cloak_mesh, geometry, dp, kept_nodes,
+            depth=cfg.loss.depth, band_x_filter=cfg.loss.band_x_filter,
+        )
+        ratio_area, loss_area = transmitted_band_metrics_fixed(
+            u_opt, ref_result.u, cm_view, fm_view, band_xs, band_ys,
+        )
+        gap_ratio = abs(ratio_depth - ratio_area)
+        gap_loss = abs(loss - loss_area)
+        h_min, h_mean, h_max = _mesh_resolution_stats(cloak_mesh)
+        ppw = lambda_min / h_max if h_max > 0 else float("nan")
+        profile_err = profile_error_surface_fixed(
+            u_opt, ref_result.u, cm_view, fm_view, surf_xs, dp.y_top,
+        )
+        if outb_xs is not None:
+            outside_band_err = normalized_l2_mag_error_fixed(
+                u_opt, ref_result.u, cm_view, fm_view, outb_xs, outb_ys,
+            )
+        else:
+            outside_band_err = float("nan")
+        wall = time.time() - t0
+        rss = _peak_rss_gb()
+        print(
+            f"ratio={ratio:.4f}  ratio_area={ratio_area:.4f}  "
+            f"loss_area={loss_area:.4e}  ppw={ppw:.1f}  "
+            f"prof_err={profile_err:.4f}  out_err={outside_band_err:.4f}  "
+            f"wall={wall:.1f}s  rss={rss:.2f} GB"
+        )
+        return {
+            "builder": bname, "rf_cloak": c, "rf_outside": o,
+            "nodes": n_nodes, "cells": n_cells,
+            "ratio": ratio, "ratio_depth": ratio_depth, "loss": loss,
+            "ratio_area": ratio_area, "loss_area": loss_area,
+            "gap_ratio": gap_ratio, "gap_loss": gap_loss,
+            "profile_error_surface": profile_err,
+            "outside_band_mag_error": outside_band_err,
+            "h_min": h_min, "h_mean": h_mean, "h_max": h_max,
+            "lambda_min": lambda_min, "ppw": ppw,
+            "wall_s": wall, "peak_rss_gb": rss, "status": "ok",
+        }
+    except Exception as exc:                                    # noqa: BLE001
+        wall = time.time() - t0
+        rss = _peak_rss_gb()
+        print(f"\n  FAILED [{bname}]: {type(exc).__name__}: {exc}")
+        return {
+            "builder": bname, "rf_cloak": c, "rf_outside": o,
+            "nodes": -1, "cells": -1,
+            "ratio": float("nan"), "ratio_depth": float("nan"),
+            "loss": float("nan"), "ratio_area": float("nan"),
+            "loss_area": float("nan"),
+            "gap_ratio": float("nan"), "gap_loss": float("nan"),
+            "profile_error_surface": float("nan"),
+            "outside_band_mag_error": float("nan"),
+            "h_min": float("nan"), "h_mean": float("nan"),
+            "h_max": float("nan"), "lambda_min": float("nan"),
+            "ppw": float("nan"),
+            "wall_s": wall, "peak_rss_gb": rss,
+            "status": f"fail:{type(exc).__name__}",
+        }
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -396,6 +680,14 @@ def main() -> None:
     p.add_argument("--f-star", type=float, default=2.0)
     p.add_argument("--cloak", default="5,10,15,25,35,50")
     p.add_argument("--outside", default="1.0,0.5,0.25")
+    p.add_argument(
+        "--builders", default="legacy_tri3",
+        help="Comma list of mesh builders to sweep (one convergence curve each). "
+             "Options: legacy_tri3 (default, historical graded TRI3), "
+             "uniform_tri3 (uniform-in-cloak linear), uniform_tri6 (uniform-in-"
+             "cloak quadratic, the new builder). With >1 builder the script "
+             "writes a `builder` CSV column and an overlay convergence figure "
+             "(<stem>_builders.png) comparing them at fixed --outside.")
     p.add_argument("-o", "--output-dir", default=None)
     p.add_argument("--n-eval-points", type=int, default=None,
                    help="Override loss.n_eval_points. 0 keeps the legacy "
@@ -449,251 +741,81 @@ def main() -> None:
     # once outside the sweep. The dp/geometry inside the loop are rebuilt
     # because f_star may change them (in fact it doesn't here; both depend
     # only on dimensionless geometry factors).
-    print(f"sweeping {len(cloaks)} × {len(outsides)} = {len(cloaks)*len(outsides)} cells")
+    # Resolve the builder sweep axis (one convergence curve per builder).
+    builders = []
+    for name in [x.strip() for x in args.builders.split(",") if x.strip()]:
+        if name not in _BUILDER_SPECS:
+            raise SystemExit(
+                f"unknown builder {name!r}; choose from {list(_BUILDER_SPECS)}")
+        mb, et = _BUILDER_SPECS[name]
+        builders.append((name, mb, et))
+
+    n_pts = len(builders) * len(cloaks) * len(outsides)
+    print(f"sweeping {len(builders)} builder(s) × {len(cloaks)} cloak × "
+          f"{len(outsides)} outside = {n_pts} points")
 
     # Write the CSV header up front and append after each sweep point so an
     # OOM mid-sweep doesn't lose all previous results.
     with open(csv_path, "w") as fh:
-        fh.write("rf_cloak,rf_outside,nodes,cells,ratio,ratio_depth,loss,"
+        fh.write("builder,rf_cloak,rf_outside,nodes,cells,ratio,ratio_depth,loss,"
                  "ratio_area,loss_area,gap_ratio,gap_loss,"
                  "profile_error_surface,outside_band_mag_error,"
                  "h_min,h_mean,h_max,lambda_min,ppw,"
                  "wall_s,peak_rss_gb,status\n")
 
-    rows: list[dict] = []
-    for c in cloaks:
-        for o in outsides:
-            cfg = _make_config(
-                base_config, args.f_star, c, o,
-                n_eval_points=args.n_eval_points,
-                eval_noise_sigma=args.eval_noise_sigma,
-                eval_noise_seed=args.eval_noise_seed,
-                embed_macro_grid=(True if args.embed_macro_grid else None),
-            )
-            dp = DerivedParams.from_config(cfg)
-            geometry = _create_geometry(cfg, dp)
-            cell_decomp = CellDecomposition(
-                geometry, base_config.cells.n_x, base_config.cells.n_y,
-            )
-
-            # Build the fixed evaluation x-positions ONCE per (c, o) pair
-            # (they only depend on geometry/dp, which are constant across the
-            # sweep at fixed f_star — but rebuilding is cheap and clearer).
-            eval_xs = None
-            if cfg.loss.n_eval_points > 0:
-                eval_xs = make_fixed_surface_eval_points(
-                    geometry, dp,
-                    cfg.loss.n_eval_points,
-                    cfg.loss.eval_noise_sigma,
-                    cfg.loss.eval_noise_seed,
+    all_rows: list[dict] = []
+    for (bname, mbuilder, etype) in builders:
+        print(f"\n########## builder = {bname} ({mbuilder} / {etype}) ##########")
+        b_rows: list[dict] = []
+        for c in cloaks:
+            for o in outsides:
+                row = _run_sweep_point(
+                    base_config, args, opt_params, solver_opts,
+                    c, o, bname, mbuilder, etype,
                 )
-
-            # Fixed (x, y) grid for the mesh-independent area-weighted band
-            # metric. Depends only on geometry/dp/depth (constant across the
-            # sweep), so the metric is a stable functional of the field.
-            band_xs, band_ys = make_band_grid_eval_points(
-                geometry, dp,
-                depth=cfg.loss.depth,
-                n_x=args.band_nx, n_y=args.band_ny,
-                mode=cfg.loss.band_x_filter,
-            )
-            # Fixed downstream surface x-grid (depth 0) for profile_error_surface.
-            surf_xs, _ = make_band_grid_eval_points(
-                geometry, dp, depth=0.0,
-                n_x=args.band_nx, n_y=1, mode=cfg.loss.band_x_filter,
-            )
-            # Out-of-band validation grid: the strip [y_top - obd, y_top - depth]
-            # just below the trained band, for the generalization metric. None
-            # (→ nan) when the requested depth is not a valid sub-band.
-            obd = float(args.outside_band_depth)
-            if obd > float(cfg.loss.depth) and obd < float(dp.H):
-                outb_xs, outb_ys = make_band_grid_eval_points(
-                    geometry, dp, depth=obd, depth_top=float(cfg.loss.depth),
-                    n_x=args.band_nx, n_y=args.band_ny, mode=cfg.loss.band_x_filter,
-                )
-            else:
-                outb_xs = outb_ys = None
-            # Shortest relevant wavelength: Rayleigh wave at the swept f_star
-            # (lambda_R = 2*pi*cR/omega = lambda_star/f_star). cR < cs < cp, so
-            # the Rayleigh branch is the shortest and governs surface resolution.
-            lambda_min = float(2.0 * np.pi * dp.cR / dp.omega)
-
-            t0 = time.time()
-            try:
-                full_mesh = generate_mesh_full(cfg, dp, geometry)
-                cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
-                n_nodes = len(cloak_mesh.points)
-                n_cells = int(cloak_mesh.cells.shape[0])
-                print(
-                    f"  rf_cloak={c:>5}  rf_out={o:>5}  "
-                    f"nodes={n_nodes:>7}  cells={n_cells:>8}  ...",
-                    end="", flush=True,
-                )
-
-                ref_result = solve_reference(cfg, mesh=full_mesh)
-                problem = build_problem(cloak_mesh, cfg, dp, geometry, cell_decomp)
-                problem.set_params(opt_params)
-                sol_list = jax_fem.solver.solver(problem, solver_options=solver_opts)
-                u_opt = np.asarray(sol_list[0])
-                if eval_xs is not None:
-                    ratio = transmitted_displacement_ratio_fixed(
-                        u_opt, ref_result.u, cloak_mesh, full_mesh,
-                        eval_xs, dp.y_top,
+                b_rows.append(row)
+                all_rows.append(row)
+                with open(csv_path, "a") as fh:
+                    fh.write(
+                        f"{row['builder']},{row['rf_cloak']},{row['rf_outside']},"
+                        f"{row['nodes']},{row['cells']},"
+                        f"{row['ratio']:.6f},{row['ratio_depth']:.6f},{row['loss']:.6e},"
+                        f"{row['ratio_area']:.6f},{row['loss_area']:.6e},"
+                        f"{row['gap_ratio']:.6f},{row['gap_loss']:.6e},"
+                        f"{row['profile_error_surface']:.6f},{row['outside_band_mag_error']:.6f},"
+                        f"{row['h_min']:.6f},{row['h_mean']:.6f},{row['h_max']:.6f},"
+                        f"{row['lambda_min']:.6f},{row['ppw']:.4f},"
+                        f"{row['wall_s']:.1f},{row['peak_rss_gb']:.2f},"
+                        f"{row['status']}\n"
                     )
-                else:
-                    cs_idx, rs_idx = _surface_indices_at_f(cloak_mesh, geometry, dp, kept_nodes)
-                    ratio = float(transmitted_displacement_ratio(u_opt, ref_result.u, cs_idx, rs_idx))
-                # Depth-band metrics matching the optimiser's
-                # magnitude_band_integral loss (unweighted node-mean over the
-                # band — mesh-density-dependent, i.e. "what the optimiser saw").
-                ratio_depth, loss = _depth_band_metrics(
-                    u_opt, ref_result.u, cloak_mesh, geometry, dp, kept_nodes,
-                    depth=cfg.loss.depth, band_x_filter=cfg.loss.band_x_filter,
-                )
-                # Mesh-independent, area-weighted counterparts on a fixed grid
-                # ("what the physics says" — converges to a single limit).
-                ratio_area, loss_area = transmitted_band_metrics_fixed(
-                    u_opt, ref_result.u, cloak_mesh, full_mesh, band_xs, band_ys,
-                )
-                # Tier-1: node-vs-area sampling-artifact gaps (→ 0 when the
-                # mesh-sampled and mesh-independent readings agree).
-                gap_ratio = abs(ratio_depth - ratio_area)
-                gap_loss = abs(loss - loss_area)
-                # Tier-1: wave-resolution diagnostics on the physical (cloak) mesh.
-                h_min, h_mean, h_max = _mesh_resolution_stats(cloak_mesh)
-                ppw = lambda_min / h_max if h_max > 0 else float("nan")
-                # Tier-2: fixed-grid surface-profile shape error and out-of-band
-                # generalization error (both mesh-independent).
-                profile_err = profile_error_surface_fixed(
-                    u_opt, ref_result.u, cloak_mesh, full_mesh, surf_xs, dp.y_top,
-                )
-                if outb_xs is not None:
-                    outside_band_err = normalized_l2_mag_error_fixed(
-                        u_opt, ref_result.u, cloak_mesh, full_mesh, outb_xs, outb_ys,
-                    )
-                else:
-                    outside_band_err = float("nan")
-                wall = time.time() - t0
-                rss = _peak_rss_gb()
-                print(
-                    f"ratio={ratio:.4f}  ratio_depth={ratio_depth:.4f}  "
-                    f"loss={loss:.4e}  ratio_area={ratio_area:.4f}  "
-                    f"loss_area={loss_area:.4e}  ppw={ppw:.1f}  "
-                    f"prof_err={profile_err:.4f}  out_err={outside_band_err:.4f}  "
-                    f"wall={wall:.1f}s  rss={rss:.2f} GB"
-                )
-                row = {
-                    "rf_cloak": c, "rf_outside": o,
-                    "nodes": n_nodes, "cells": n_cells,
-                    "ratio": ratio, "ratio_depth": ratio_depth, "loss": loss,
-                    "ratio_area": ratio_area, "loss_area": loss_area,
-                    "gap_ratio": gap_ratio, "gap_loss": gap_loss,
-                    "profile_error_surface": profile_err,
-                    "outside_band_mag_error": outside_band_err,
-                    "h_min": h_min, "h_mean": h_mean, "h_max": h_max,
-                    "lambda_min": lambda_min, "ppw": ppw,
-                    "wall_s": wall, "peak_rss_gb": rss,
-                    "status": "ok",
-                }
-            except Exception as exc:                                # noqa: BLE001
-                wall = time.time() - t0
-                rss = _peak_rss_gb()
-                print(f"\n  FAILED: {type(exc).__name__}: {exc}")
-                row = {
-                    "rf_cloak": c, "rf_outside": o,
-                    "nodes": -1, "cells": -1,
-                    "ratio": float("nan"), "ratio_depth": float("nan"),
-                    "loss": float("nan"), "ratio_area": float("nan"),
-                    "loss_area": float("nan"),
-                    "gap_ratio": float("nan"), "gap_loss": float("nan"),
-                    "profile_error_surface": float("nan"),
-                    "outside_band_mag_error": float("nan"),
-                    "h_min": float("nan"), "h_mean": float("nan"),
-                    "h_max": float("nan"), "lambda_min": float("nan"),
-                    "ppw": float("nan"),
-                    "wall_s": wall, "peak_rss_gb": rss,
-                    "status": f"fail:{type(exc).__name__}",
-                }
-            rows.append(row)
-            with open(csv_path, "a") as fh:
-                fh.write(
-                    f"{row['rf_cloak']},{row['rf_outside']},{row['nodes']},{row['cells']},"
-                    f"{row['ratio']:.6f},{row['ratio_depth']:.6f},{row['loss']:.6e},"
-                    f"{row['ratio_area']:.6f},{row['loss_area']:.6e},"
-                    f"{row['gap_ratio']:.6f},{row['gap_loss']:.6e},"
-                    f"{row['profile_error_surface']:.6f},{row['outside_band_mag_error']:.6f},"
-                    f"{row['h_min']:.6f},{row['h_mean']:.6f},{row['h_max']:.6f},"
-                    f"{row['lambda_min']:.6f},{row['ppw']:.4f},"
-                    f"{row['wall_s']:.1f},{row['peak_rss_gb']:.2f},"
-                    f"{row['status']}\n"
-                )
+
+        # Per-builder text grids + the standard 2×3 / 2×4 convergence figures.
+        run_name = Path(args.params).parent.name
+        _print_grids(
+            b_rows, cloaks, outsides,
+            f"{run_name}  f*={args.f_star:.2f}  builder={bname} (homogenised)",
+        )
+        if any(r["status"] == "ok" for r in b_rows):
+            stem = csv_path.with_name(
+                f"{csv_path.stem}_{bname}.png")
+            plot_paths = plot_results(
+                csv_path, save_path=stem, rows=b_rows,
+                title=f"{run_name}  f*={args.f_star:.2f}  {bname} (homogenised)",
+            )
+            for pp in plot_paths:
+                print(f"plot → {pp}")
 
     print(f"\nCSV → {csv_path}")
 
-    by_pair = {(r["rf_cloak"], r["rf_outside"]): r for r in rows}
-    print(f"\n=== {Path(args.params).parent.name}  f*={args.f_star:.2f} (homogenised) ===")
-    print(_format_grid(
-        "u_ratio", cloaks, outsides,
-        {k: f"{v['ratio']:.4f}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "ratio_depth", cloaks, outsides,
-        {k: f"{v['ratio_depth']:.4f}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "loss", cloaks, outsides,
-        {k: f"{v['loss']:.3e}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "ratio_area", cloaks, outsides,
-        {k: f"{v['ratio_area']:.4f}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "loss_area", cloaks, outsides,
-        {k: f"{v['loss_area']:.3e}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "gap_loss", cloaks, outsides,
-        {k: f"{v['gap_loss']:.3e}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "out_band_err", cloaks, outsides,
-        {k: f"{v['outside_band_mag_error']:.4f}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "ppw", cloaks, outsides,
-        {k: f"{v['ppw']:.1f}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "cells", cloaks, outsides,
-        {k: f"{v['cells']:>7}" if v["status"] == "ok" else "FAIL" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "wall_s", cloaks, outsides,
-        {k: f"{v['wall_s']:.1f}" for k, v in by_pair.items()},
-    ))
-    print()
-    print(_format_grid(
-        "rss_gb", cloaks, outsides,
-        {k: f"{v['peak_rss_gb']:.2f}" for k, v in by_pair.items()},
-    ))
-
-    if any(r["status"] == "ok" for r in rows):
-        plot_paths = plot_results(
-            csv_path,
-            title=f"{Path(args.params).parent.name}  f*={args.f_star:.2f} (homogenised)",
+    # Cross-builder overlay (TRI3 vs TRI6 convergence) when >1 builder swept.
+    if len(builders) > 1:
+        overlay = plot_builder_overlay(
+            all_rows,
+            csv_path.with_name(f"{csv_path.stem}_builders.png"),
+            title=f"{Path(args.params).parent.name}  f*={args.f_star:.2f}",
         )
-        for pp in plot_paths:
-            print(f"plot → {pp}")
+        if overlay is not None:
+            print(f"overlay plot → {overlay}")
 
 
 if __name__ == "__main__":

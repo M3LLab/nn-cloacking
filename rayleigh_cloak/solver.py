@@ -17,13 +17,16 @@ from rayleigh_cloak.cells import CellDecomposition
 from rayleigh_cloak.config import DerivedParams, SimulationConfig
 from rayleigh_cloak.geometry.triangular import TriangularCloakGeometry
 from rayleigh_cloak.materials import C_iso, CellMaterial
-from rayleigh_cloak.mesh import extract_submesh, generate_mesh, generate_mesh_full
+from rayleigh_cloak import mesh as _legacy_mesh
+from rayleigh_cloak import mesh_uniform as _uniform_mesh
+from rayleigh_cloak.mesh import extract_submesh
 from rayleigh_cloak.optimize import (
     OptimizationResult,
     cloaking_distortion_percent,
     get_all_physical_boundary_indices,
     get_outside_cloak_indices,
     get_right_boundary_indices,
+    get_top_surface_beyond_cloak_indices,
     run_optimization,
 )
 from rayleigh_cloak.material_prior import GMMPrior, load_gmm_prior
@@ -82,6 +85,28 @@ def _petsc_opts(config: SimulationConfig) -> dict:
     return {"petsc_solver": opts}
 
 
+def _mesh_module(config: SimulationConfig):
+    """Select the mesh builder module from ``config.mesh.builder``.
+
+    ``"uniform_tri6"`` -> :mod:`rayleigh_cloak.mesh_uniform` (uniform-in-cloak,
+    honours ``ele_type`` TRI3/TRI6); anything else -> the legacy graded builder
+    :mod:`rayleigh_cloak.mesh`. Default is legacy, so existing runs are unchanged.
+    """
+    if config.mesh.builder == "uniform_tri6":
+        return _uniform_mesh
+    return _legacy_mesh
+
+
+def _single_mesh(config, params, geometry) -> Mesh:
+    """Dispatch :func:`generate_mesh` (with-cutout / reference) on the builder."""
+    return _mesh_module(config).generate_mesh(config, params, geometry)
+
+
+def _full_mesh(config, params, geometry) -> Mesh:
+    """Dispatch :func:`generate_mesh_full` (no cutout) on the builder."""
+    return _mesh_module(config).generate_mesh_full(config, params, geometry)
+
+
 def solve(
     config: SimulationConfig,
     mesh: Mesh | None = None,
@@ -104,7 +129,7 @@ def solve(
     geometry = _create_geometry(config, params)
 
     if mesh is None:
-        mesh = generate_mesh(config, params, geometry)
+        mesh = _single_mesh(config, params, geometry)
     problem = build_problem(mesh, config, params, geometry)
 
     solver_opts = _petsc_opts(config)
@@ -140,7 +165,7 @@ def solve_cell_based(config: SimulationConfig) -> SolutionResult:
     geometry = _create_geometry(config, params)
 
     print("=== Generating shared mesh ===")
-    full_mesh = generate_mesh_full(config, params, geometry)
+    full_mesh = _full_mesh(config, params, geometry)
 
     print("=== Extracting submesh (removing defect) ===")
     cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
@@ -186,7 +211,7 @@ def solve_optimization(config: SimulationConfig, step_callback=None) -> Optimiza
     geometry = _create_geometry(config, params)
 
     print("=== Step 1: Generating shared mesh ===")
-    full_mesh = generate_mesh_full(config, params, geometry)
+    full_mesh = _full_mesh(config, params, geometry)
     print(f"  Full mesh: {len(full_mesh.points)} nodes, "
           f"{len(full_mesh.cells)} elements")
 
@@ -307,7 +332,7 @@ def solve_optimization_neural(
     geometry = _create_geometry(config, params)
 
     print("=== Step 1: Generating shared mesh ===")
-    full_mesh = generate_mesh_full(config, params, geometry)
+    full_mesh = _full_mesh(config, params, geometry)
     print(f"  Full mesh: {len(full_mesh.points)} nodes, "
           f"{len(full_mesh.cells)} elements")
 
@@ -506,6 +531,17 @@ def solve_optimization_neural(
     )
     print(f"  {len(boundary_indices)} loss nodes ({config.loss.type})")
 
+    # Free-surface transmission metric (independent of the training loss): the
+    # transmitted-displacement ratio on the surface *beyond* the cloak. The node
+    # sets are fixed for the whole run, so we precompute them once and let the
+    # optimisation loop evaluate the ratio every step from the field it already
+    # solves for (no extra forward solve).
+    trans_surface_case = get_top_surface_beyond_cloak_indices(
+        np.asarray(cloak_mesh.points), geometry, params.y_top,
+        params.x_off, params.x_off + params.W,
+    )
+    trans_surface_ref = kept_nodes[trans_surface_case]
+
     fwd_pred = ad_wrapper(problem, solver_opts, solver_opts)
 
     print("=== Step 6: Optimising (neural reparam) ===")
@@ -514,6 +550,9 @@ def solve_optimization_neural(
         params_init=params_init,
         u_ref_boundary=u_ref_boundary,
         boundary_indices=boundary_indices,
+        u_ref_full=ref_result.u,
+        trans_surface_case=trans_surface_case,
+        trans_surface_ref=trans_surface_ref,
         reparam=reparam,
         theta_init=theta_init,
         n_iters=opt_cfg.n_iters,
@@ -560,7 +599,7 @@ def solve_optimization_neural_topo(
     topo_cfg = config.optimization.topo_neural
 
     print("=== Step 1: Generating shared mesh ===")
-    full_mesh = generate_mesh_full(config, params, geometry)
+    full_mesh = _full_mesh(config, params, geometry)
     print(f"  Full mesh: {len(full_mesh.points)} nodes, "
           f"{len(full_mesh.cells)} elements")
 
@@ -958,7 +997,7 @@ def solve_nassar(config: SimulationConfig) -> NassarResult:
     geometry = _create_geometry(config, params)
 
     print("=== Step 1: Generating shared mesh ===")
-    full_mesh = generate_mesh_full(config, params, geometry)
+    full_mesh = _full_mesh(config, params, geometry)
     print(f"  Full mesh: {len(full_mesh.points)} nodes, "
           f"{len(full_mesh.cells)} elements")
 
