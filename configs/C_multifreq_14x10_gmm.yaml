@@ -1,0 +1,94 @@
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0          # nominal/base only; the band is set by loss.multi_freq
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 60
+  ny_phys: 40
+  refinement_factor: 3            # h_in  = 0.0246  (cloak interior)
+  refinement_factor_outside: 0.75 # h_out = 0.0982  (far field, ppw≈3.4 @ f*=3)
+  ele_type: TRI6
+  builder: uniform_tri6
+  embed_macro_grid: false         # incompatible with the uniform builder (§3e)
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+  pc_factor_mat_solver_type: mumps
+
+cells:
+  enabled: true
+  init: dataset_centroid
+  init_path: dataset/gmm/gmm_flat4_squared_2m.npz   # centroid of the hifi 2m GMM
+  n_x: 14
+  n_y: 10
+  n_C_params: 4
+  symmetrize_init: false
+
+loss:
+  type: magnitude_band_integral
+  depth: 0.5
+  multi_freq:
+    f_stars: [1.0, 1.3333, 1.6667, 2.0, 2.3333, 2.6667, 3.0]
+    weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    max_workers: 3   # RAM-SAFE. A 7-way pool keeps all 7 MUMPS LU factorisations of the ~75k-node TRI6 mesh resident in ONE process and peaked at ~60 GB RSS (systemd-oomd kill on Jun 7; 3 hard machine hangs Jun 12/13/14) — it exceeds the 62 GB box. 3 ≈ 26 GB peak. Affects speed only, not the result; raise cautiously while watching health.log.
+  regularizations:
+    material_cement_GMM:
+      enabled: true                                   # manufacturability prior ON
+      path: dataset/gmm/gmm_flat4_squared_2m.npz      # GMM fit on output/ca_squared_2m/stiffness.h5
+      weight: 0.1
+      quantile: 0.1
+
+optimization:
+  method: neural
+  n_iters: 3000
+  lr: 0.0005
+  lr_end: 1.0e-05
+  lr_schedule: cosine
+  lambda_l2: 0.0
+  lambda_neighbor: 0.0
+  plot_every: 0
+  neural:
+    hidden_size: 512
+    n_layers: 6
+    n_fourier: 64
+    seed: 42
+    output_scale: 0.1
+    constrained: true            # keep every cell positive-definite (§3c)
+    kappa: 0.95
+    cap_anisotropy: true
+    anisotropy_ratio: 12.0
+    # Warm-restart from the B no-GMM ceiling solution (restart2 best: step 478,
+    # loss 0.0235). Starts from that converged unconstrained cloak and lets the
+    # GMM prior + hifi-2m dataset_centroid pull it onto the manufacturable
+    # manifold; carries Adam state -> resumes momentum. Same architecture
+    # (hidden 512 / 6 layers / 64 fourier), so the weights load directly.
+    init_weights: /home/m3l/workspace/nn-cloaking/output/B_multifreq_14x10_nogmm_restart2/best_weights.npz
+
+output_dir: output/C_multifreq_14x10_gmm
