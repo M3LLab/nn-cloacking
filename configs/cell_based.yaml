@@ -1,0 +1,65 @@
+# Triangular cloak with cell-based (piecewise-constant) C_eff and rho_eff.
+# Each cell in the decomposition has a single constant stiffness tensor and
+# density, initialised from the continuous push-forward at cell centres.
+#
+# Usage:  python run.py configs/cell_based.yaml          (forward solve)
+#         python run_optimize.py configs/cell_based.yaml  (with optimisation)
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 50
+  ny_phys: 30
+  refinement_factor: 4
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 50
+  n_y: 50
+  n_C_params: 6
+
+loss:
+  tol: 1e-2
+
+optimization:
+  n_iters: 10000
+  lr: 0.5
+  lambda_l2: 0.001
+  lambda_neighbor: 0.001
+  plot_every: 100
+  init_params: ""
+
+output_dir: output/cell_based

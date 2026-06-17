@@ -1,0 +1,10 @@
+__pycache__
+output
+.vscode
+*.pyc
+jax-fem
+*.log
+*.aux
+*.out
+*.toc
+*.gz

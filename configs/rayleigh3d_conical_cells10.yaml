@@ -1,0 +1,66 @@
+is_reference: false
+geometry_type: conical
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 6.0
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml: 8
+  n_phys: 18
+  refinement_factor: 2
+  ele_type: TET4
+
+source:
+  source_type: gaussian_point
+  x_src_factor: 0.25
+  y_src_factor: 0.5
+  sigma_factor: 0.05
+  F0: 1.0
+
+solver:
+  backend: cudss
+
+cells:
+  mode: grid
+  n_x: 10
+  n_y: 10
+  n_z: 10
+  n_C_params: 2
+  symmetrize_init: true
+
+optimization:
+  method: neural
+  n_iters: 1000
+  lr: 0.01
+  lr_end: 0.0001
+  lr_schedule: cosine
+  lambda_l2: 0.0
+  plot_every: 1
+  neural:
+    hidden_size: 256
+    n_layers: 6
+    n_fourier: 32
+    seed: 42
+    output_scale: 0.1
+
+loss:
+  type: top_surface
+
+output_dir: output/rayleigh3d_conical_cells10

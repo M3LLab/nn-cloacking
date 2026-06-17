@@ -1,0 +1,60 @@
+# Circular cloak with cell-based optimisation (80×80 grid).
+# Nassar 2018 geometry — plane P-wave at 40 kHz, circular void.
+# Loss: right physical boundary displacement matching.
+#
+# Usage:  python run_optimize.py configs/circular_optimize.yaml
+
+is_reference: false
+geometry_type: circular
+
+material:
+  rho0: 2.7
+  cs: 962.25
+
+circular_geometry:
+  ri: 0.050
+  rc: 0.150
+
+source:
+  source_type: plane_wave
+  wave_type: P
+  frequency_hz: 40000.0
+  x_src_factor: 0.15
+  sigma_factor: 1.0
+  F0: 1.0e8
+
+absorbing:
+  L_pml_factor: 2.0
+  xi_max: 4.0
+  pml_pow: 2
+  pml_all_sides: true
+
+mesh:
+  n_pml_x: 20
+  n_pml_y: 20
+  nx_phys: 160
+  ny_phys: 160
+  refinement_factor: 5
+  ele_type: TRI3
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 80
+  n_y: 80
+  n_C_params: 10
+
+loss:
+  tol: 1e-3
+
+optimization:
+  n_iters: 1000
+  lr: 0.025
+  lambda_l2: 0.001
+  lambda_neighbor: 0.001
+  plot_every: 100
+
+output_dir: output/circular_optimize_10c

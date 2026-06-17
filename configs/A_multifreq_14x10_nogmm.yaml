@@ -1,0 +1,119 @@
+# Multi-frequency (f* = 1.0 … 3.0) cloak optimisation, 14×10 macro cells.
+# Based on output/A_cell_sweep/cells_14x10/config.yaml (single-freq), extended
+# to a 7-frequency band. WITHOUT the GMM material-manufacturability prior
+# (regularization disabled) — i.e. the unconstrained-by-dataset cloak ceiling.
+# `constrained: true` is still kept (positive-definiteness is a *physics*
+# requirement, not a manufacturability prior — see §3c).
+#
+# ── Mesh sizing (Regime B, docs/mesh_refinement_selection.md) ─────────────────
+# The macro mesh is built ONCE from this base config and reused for every
+# frequency (solver reuses full_mesh across f*), so it must resolve the SHORTEST
+# wavelength in the band, at f*=3.0:  λ_R = λ_star/f_star = 1/3 = 0.3333.
+# h_elem = min(W_total/nx_total, H_total/ny_total) = 0.0737  (nx_phys=60,
+#          ny_phys=40, n_pml=32 → nx_total=124, ny_total=72).
+#   refinement_factor        = 3    → h_in  = h_elem/3   = 0.0246
+#   refinement_factor_outside= 0.75 → h_out = h_elem/.75 = 0.0982
+# Checks at the binding (top) frequency f*=3.0 (TRI6 → ppw target 5–6 far field):
+#   • Cell jumps: d_cell(14×10) ≈ 0.095 → 0.095/h_in = 3.9 elem across the
+#     smallest macro cell  (guide §3d: ≥ 2–3).            ✓
+#   • Wave inside cloak: ppw_in = λ_R/h_in = 13.6.        ✓ (very safe)
+#   • Far field: ppw_far = λ_R/h_out = 3.4.  This is the *ranking-grade*
+#     resolution the guide validates as dispersion-robust for design/optimisation
+#     (§3b; matches the single-freq sweep's economical far field held at constant
+#     ppw up to f*=3). It also keeps the full mesh at ~75k nodes so the 7-way
+#     frequency thread-pool (max_workers below) fits in ~36 GB RAM; a ppw≈5 far
+#     field (rf_out≈1.1) → ~124k nodes → the parallel factorisations OOM.
+#   • constraint rf_out ≤ rf_cloak (0.75 ≤ 3) satisfied → no inverted surface
+#     threshold (§3e).                                    ✓
+# FINAL ABSOLUTE validation of the optimised design should re-evaluate the
+# transmission_ratio on a finer far field (rf_out≈1.1, ppw_far≈5) per §3b/§4.
+# Full mesh ≈ 75k TRI6 nodes; per step = 7 freqs × (forward + adjoint).
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0          # nominal/base only; the band is set by loss.multi_freq
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 60
+  ny_phys: 40
+  refinement_factor: 3            # h_in  = 0.0246  (cloak interior)
+  refinement_factor_outside: 0.75 # h_out = 0.0982  (far field, ppw≈3.4 @ f*=3)
+  ele_type: TRI6
+  builder: uniform_tri6
+  embed_macro_grid: false         # incompatible with the uniform builder (§3e)
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+  pc_factor_mat_solver_type: mumps
+
+cells:
+  enabled: true
+  init: dataset_centroid
+  init_path: dataset/gmm_flat4.npz
+  n_x: 14
+  n_y: 10
+  n_C_params: 4
+  symmetrize_init: false
+
+loss:
+  type: magnitude_band_integral
+  depth: 0.5
+  multi_freq:
+    f_stars: [1.0, 1.3333, 1.6667, 2.0, 2.3333, 2.6667, 3.0]
+    weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    max_workers: 7
+  regularizations:
+    material_cement_GMM:
+      enabled: false              # NO manufacturability prior in this variant
+      path: dataset/gmm_flat4.npz
+      weight: 0.0
+      quantile: 0.25
+
+optimization:
+  method: neural
+  n_iters: 3000
+  lr: 0.0005
+  lr_end: 1.0e-05
+  lr_schedule: cosine
+  lambda_l2: 0.0
+  lambda_neighbor: 0.0
+  plot_every: 0
+  neural:
+    hidden_size: 512
+    n_layers: 6
+    n_fourier: 64
+    seed: 42
+    output_scale: 0.1
+    constrained: true            # keep every cell positive-definite (§3c)
+    kappa: 0.95
+    cap_anisotropy: true
+    anisotropy_ratio: 12.0
+
+output_dir: output/A_multifreq_14x10_nogmm

@@ -448,6 +448,231 @@ def plot_vtk_results(vtk_path, percentile=95,
     print(f"VTK |Re(u)| plot saved → {fname_re_mag}")
 
 
+def _plot_field_on_phys_domain(
+    values: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str,
+    cbar_label: str,
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+    symmetric: bool = False,
+) -> None:
+    """Render a per-node scalar field on the physical domain.
+
+    Shared by :func:`plot_displacement_field` (magnitude) and the
+    Re(u_y) panel produced by :func:`plot_reference_field`.  Set
+    ``symmetric=True`` for signed fields like Re(u_y) — the half-range
+    is taken from the percentile of ``|values|`` so the colourbar is
+    centred at zero.
+    """
+    import matplotlib.tri as mtri
+
+    x_off, y_off = params.x_off, params.y_off
+    W, H = params.W, params.H
+
+    phys = ((pts_x >= x_off - 1e-8) & (pts_x <= x_off + W + 1e-8) &
+            (pts_y >= y_off - 1e-8))
+
+    px = pts_x[phys] - x_off
+    py = pts_y[phys] - y_off
+    pv = values[phys]
+
+    if symmetric:
+        vlim = np.percentile(np.abs(pv), percentile)
+        norm = _build_norm(norm_type, -vlim, vlim, mid=0.0, symmetric=True)
+    else:
+        vmin_v = np.percentile(pv, 100 - percentile)
+        vmax_v = np.percentile(pv, percentile)
+        norm = _build_norm(norm_type, vmin_v, vmax_v, mid=0.25 * vmax_v)
+
+    if cells is not None:
+        # Re-index the connectivity into the physical-domain submask so the
+        # cut-out cloak void is preserved as a hole.
+        cells = np.asarray(cells)
+        # For quadratic (TRI6) meshes, matplotlib's Triangulation needs the
+        # 3-node corner connectivity; the midside nodes are not triangulation
+        # vertices (the |u| contour is a P1 plot of the corner values).
+        if cells.ndim == 2 and cells.shape[1] > 3:
+            cells = cells[:, :3]
+        new_index = -np.ones(pts_x.shape[0], dtype=np.int64)
+        new_index[np.where(phys)[0]] = np.arange(int(phys.sum()))
+        cell_keep = phys[cells].all(axis=1)
+        triang = mtri.Triangulation(px, py, new_index[cells[cell_keep]])
+        tri_arg = (triang,)
+    else:
+        tri_arg = (px, py)
+
+    fig, ax = plt.subplots(figsize=(13, 4))
+    tc = ax.tricontourf(*tri_arg, pv, levels=100, cmap='RdBu_r', norm=norm)
+
+    ax.plot(params.x_src - x_off, H, 'r*', markersize=12)
+
+    a, b, c_hw = params.a, params.b, params.c
+    xc = W / 2.0
+    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - b, H],
+            ls='--', color='yellow', lw=1.2)
+    ax.plot([xc - c_hw, xc, xc + c_hw], [H, H - a, H],
+            ls='--', color='yellow', lw=1.2)
+
+    fig.colorbar(tc, ax=ax, shrink=0.8, label=cbar_label)
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_aspect('equal')
+
+    os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_displacement_field(
+    u: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str = "|u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+) -> None:
+    """Plot the phase-invariant complex magnitude
+    ``|U| = sqrt(|U_x|^2 + |U_y|^2)`` in the physical domain.
+
+    Parameters
+    ----------
+    u : (num_nodes, 4)  — DOFs [Re(ux), Re(uy), Im(ux), Im(uy)]
+    pts_x, pts_y : node coordinates
+    params : DerivedParams (for domain extents and cloak geometry)
+    save_path : output PNG path
+    cells : (n_cells, 3) int, optional
+        Triangle connectivity of the (sub-)mesh.  When provided, the
+        plot uses this triangulation instead of letting matplotlib
+        Delaunay-triangulate the points — required to preserve the
+        cut-out cloak void as a hole rather than filling it in.
+    """
+    full_mag = np.sqrt(u[:, 0] ** 2 + u[:, 1] ** 2
+                       + u[:, 2] ** 2 + u[:, 3] ** 2)
+    _plot_field_on_phys_domain(
+        full_mag, pts_x, pts_y, params,
+        save_path=save_path, title=title, cbar_label='|u|',
+        percentile=percentile, norm_type=norm_type, cells=cells,
+        symmetric=False,
+    )
+
+
+def plot_step_field(
+    u: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str = "|u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+) -> None:
+    """Save per-step magnitude and in-phase real-displacement panels.
+
+    Writes the phase-invariant magnitude ``|U|`` to ``save_path`` and
+    the in-phase ``sqrt(Re(u_x)^2 + Re(u_y)^2)`` snapshot to
+    ``<stem>_re_mag<ext>``.  The real-magnitude panel exposes the
+    propagating wave that the envelope hides.
+    """
+    plot_displacement_field(
+        u, pts_x, pts_y, params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
+    re_mag = np.sqrt(u[:, 0] ** 2 + u[:, 1] ** 2)
+    root, ext = os.path.splitext(save_path)
+    _plot_field_on_phys_domain(
+        re_mag, pts_x, pts_y, params,
+        save_path=f"{root}_re_mag{ext}",
+        title=title.replace("|u|", "|Re(u)|"),
+        cbar_label="|Re(u)|",
+        percentile=percentile, norm_type=norm_type, cells=cells,
+        symmetric=False,
+    )
+
+
+def plot_field_panels(
+    u: np.ndarray,
+    pts_x: np.ndarray,
+    pts_y: np.ndarray,
+    params,
+    save_path: str,
+    title: str = "|u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+    cells: np.ndarray | None = None,
+) -> None:
+    """Save four void-aware diagnostic panels for one displacement solution.
+
+    Files written next to ``save_path`` (suffix on the filename stem):
+
+      * ``''``         — |U| phase-invariant magnitude (envelope only)
+      * ``'_re_ux'``   — Re(u_x), wavelength-visible component
+      * ``'_re_uy'``   — Re(u_y), wavelength-visible component
+      * ``'_re_mag'``  — ``sqrt(Re(u_x)^2 + Re(u_y)^2)``, the
+        in-phase real-displacement snapshot
+
+    Pass ``cells`` (the mesh connectivity) so a cut-out cloak void is
+    preserved as a hole instead of being filled by Delaunay triangulation.
+    Shared by :func:`plot_reference_field` and the forward-solve CLI (``run.py``).
+    """
+    plot_displacement_field(
+        u, pts_x, pts_y, params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
+
+    root, ext = os.path.splitext(save_path)
+    re_ux = u[:, 0]
+    re_uy = u[:, 1]
+    re_mag = np.sqrt(re_ux ** 2 + re_uy ** 2)
+
+    panels = (
+        ("_re_ux",  re_ux,  "Re(u_x)", True),
+        ("_re_uy",  re_uy,  "Re(u_y)", True),
+        ("_re_mag", re_mag, "|Re(u)|", False),
+    )
+    for suffix, vals, label, sym in panels:
+        _plot_field_on_phys_domain(
+            vals, pts_x, pts_y, params,
+            save_path=f"{root}{suffix}{ext}",
+            title=title.replace("|u|", label),
+            cbar_label=label,
+            percentile=percentile, norm_type=norm_type, cells=cells,
+            symmetric=sym,
+        )
+
+
+def plot_reference_field(
+    ref_result: SolutionResult,
+    save_path: str,
+    title: str = "Reference field |u|",
+    percentile: float = 95,
+    norm_type: NormType = 'linear',
+) -> None:
+    """Save four diagnostic panels for a reference (uncloaked) solve.
+
+    Thin wrapper over :func:`plot_field_panels` that pulls the node
+    coordinates and connectivity from ``ref_result``.
+    """
+    pts = np.asarray(ref_result.mesh.points)
+    cells = np.asarray(ref_result.mesh.cells)
+    plot_field_panels(
+        ref_result.u, pts[:, 0], pts[:, 1], ref_result.params,
+        save_path=save_path, title=title,
+        percentile=percentile, norm_type=norm_type, cells=cells,
+    )
+
+
 def plot_results(result: SolutionResult, percentile: float = 95,
                  norm_type: NormType = 'linear') -> None:
     """Save VTK and call the standalone plotting code."""

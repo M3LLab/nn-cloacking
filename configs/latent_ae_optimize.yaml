@@ -1,0 +1,36 @@
+# Latent-space multi-frequency optimization with α·min-max + (1−α)·mean loss.
+# Inner-loop FEM uses the existing JAX solver via latent_ae/fem_bridge.py.
+
+ae_checkpoint: output/latent_ae_train_hi_fi/best.pt
+dataset_path: output/surrogate_dataset/surrogate_high_fidelity.h5
+out_dir: output/latent_ae_optimize_demo
+
+# FEM base config (geometry, mesh, material). Overridden per-step only for f_star.
+fem_base_config: configs/cauchy_tri_top.yaml
+
+# frequency bandwidth
+f_min: 1.5
+f_max: 2.5
+f_step: 0.25
+max_workers: 0            # 0 = one worker per frequency
+
+# loss blending: L = alpha * L_minmax + (1 - alpha) * L_mean
+alpha_start: 1.0          # 1.0 = pure min-max
+alpha_end:   0.0          # 0.0 = pure mean
+alpha_schedule: cosine    # none | linear | cosine
+
+# initialization
+init_strategy: barycenter_of_best_per_f
+barycenter_nearest_f_tol: 0.1
+
+# optimization
+n_iters: 1000
+lr: 5.0e-2
+lr_schedule: cosine
+lr_end: 5.0e-5
+optimizer: adam
+
+# bookkeeping
+plot_every: 25
+save_every: 25
+seed: 0

@@ -1,0 +1,69 @@
+# Triangular cloak with neural-reparameterized optimisation (50x50 grid).
+# Same setup as cell_based.yaml but uses MLP to map (x,y) -> materials.
+# Neighbor regularization is replaced by the MLP's implicit smoothness.
+#
+# Usage:  python run_optimize.py configs/triangular_optimize_neural.yaml
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 50
+  ny_phys: 30
+  refinement_factor: 3
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 50
+  n_y: 50
+  n_C_params: 2
+  symmetrize_init: true  # set true to enforce minor symmetry (C_ijkl = C_jikl) at init
+
+optimization:
+  method: neural
+  n_iters: 1000
+  lr: 0.001
+  lr_end: 0.0001
+  lambda_l2: 0.01
+  lambda_neighbor: 0.0  # not used with neural reparam
+  plot_every: 1
+  neural:
+    hidden_size: 256
+    n_layers: 4
+    n_fourier: 32
+    seed: 42
+    output_scale: 0.1
+
+output_dir: output/triangule_cauchy

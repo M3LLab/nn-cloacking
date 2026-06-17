@@ -1,0 +1,88 @@
+# Exp 3: Finer FEM mesh for denser sampling of the density field
+# Rationale: The MLP produces a continuous density field sampled at FEM
+# quadrature points. With nx_phys=50 and refinement=5, the cloak region
+# has limited qp density. Increasing to nx_phys=80, ny_phys=80 with
+# refinement_factor=6 gives ~2.5x more quadrature points in the cloak,
+# meaning the FEM "sees" the density field at higher resolution.
+# Coarser pixel grid (pixel_per_cell=10) — doesn't matter since the MLP
+# is a continuous function; what matters is qp sampling.
+# More coarse cells (20x20) for better init matching from dataset.
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 80
+  ny_phys: 80
+  refinement_factor: 6
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 20
+  n_y: 20
+  n_C_params: 2
+  symmetrize_init: true
+
+loss:
+  tol: 3e-2
+
+optimization:
+  method: neural_topo
+  n_iters: 500
+  lr: 0.004
+  lr_end: 0.001
+  lambda_l2: 0.0
+  lambda_neighbor: 0.0
+  plot_every: 10
+  topo_neural:
+    hidden_size: 256
+    n_layers: 4
+    n_fourier: 32
+    seed: 42
+    pixel_per_cell: 10
+    simp_p: 3.0
+    E_cement: 30.0e9
+    nu_micro: 0.2
+    rho_cement: 2300.0
+    lambda_bin: 0.001
+    rho_weight: 0.0
+    dataset_path: output/dataset_30k.h5
+    output_scale: 1.0
+    density_eps: 0.01
+    beta_start: 4.0
+    beta_end: 4.0
+    fourier_sigma: 100.0
+
+output_dir: output/topo4_fine_mesh

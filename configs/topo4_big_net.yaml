@@ -1,0 +1,86 @@
+# Exp 4: Larger MLP + lower Fourier sigma for controlled expressiveness
+# Rationale: fourier_sigma=100 produces very high-frequency features that
+# may cause the MLP to oscillate at spatial scales smaller than the FEM can
+# resolve. Lower sigma=30 gives smoother features that match the physical
+# resolution. Bigger network (5 layers, 512 hidden) with more Fourier modes
+# (n_fourier=64) gives capacity without noise.
+# Longer run (800 steps) with gentle lr decay.
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 50
+  ny_phys: 50
+  refinement_factor: 5
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 10
+  n_y: 10
+  n_C_params: 2
+  symmetrize_init: true
+
+loss:
+  tol: 3e-2
+
+optimization:
+  method: neural_topo
+  n_iters: 800
+  lr: 0.003
+  lr_end: 0.001
+  lambda_l2: 0.0
+  lambda_neighbor: 0.0
+  plot_every: 20
+  topo_neural:
+    hidden_size: 512
+    n_layers: 5
+    n_fourier: 64
+    seed: 42
+    pixel_per_cell: 25
+    simp_p: 3.0
+    E_cement: 30.0e9
+    nu_micro: 0.2
+    rho_cement: 2300.0
+    lambda_bin: 0.002
+    rho_weight: 0.0
+    dataset_path: output/dataset_30k.h5
+    output_scale: 1.0
+    density_eps: 0.01
+    beta_start: 4.0
+    beta_end: 4.0
+    fourier_sigma: 30.0
+
+output_dir: output/topo4_big_net

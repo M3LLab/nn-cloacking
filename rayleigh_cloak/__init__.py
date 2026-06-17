@@ -24,7 +24,7 @@ from rayleigh_cloak.config import DerivedParams, SimulationConfig, load_config
 
 
 def __getattr__(name: str):
-    if name in ("solve", "solve_reference", "SolutionResult"):
+    if name in ("solve", "solve_reference", "solve_cell_based", "SolutionResult"):
         from rayleigh_cloak import solver
 
         return getattr(solver, name)
@@ -37,5 +37,6 @@ __all__ = [
     "load_config",
     "solve",
     "solve_reference",
+    "solve_cell_based",
     "SolutionResult",
 ]

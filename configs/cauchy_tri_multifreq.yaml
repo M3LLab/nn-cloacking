@@ -1,0 +1,71 @@
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 50
+  ny_phys: 30
+  refinement_factor: 3
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 50
+  n_y: 50
+  n_C_params: 2
+  symmetrize_init: true
+
+loss:
+  type: top_surface
+  multi_freq:
+    f_stars: [1.0, 1.33, 1.66, 2.0, 2.33, 2.66, 3.0]
+    weights: [0.6, 0.8, 1.0, 1.2, 1.0, 0.8, 0.6]
+    max_workers: 7
+
+optimization:
+  method: neural
+  n_iters: 100
+  lr: 0.0005
+  lr_end: 0.000001
+  lr_schedule: cosine
+  lambda_l2: 0.0
+  lambda_neighbor: 0.0
+  plot_every: 1
+  neural:
+    hidden_size: 512
+    n_layers: 6
+    n_fourier: 64
+    seed: 42
+    output_scale: 0.1
+
+output_dir: output/cauchy_tri_multifreq

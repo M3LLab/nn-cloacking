@@ -1,0 +1,41 @@
+# Training config for the frequency-aware autoencoder on the hi-fi dataset.
+
+data_path: output/surrogate_dataset/surrogate_high_fidelity.h5
+out_dir: output/latent_ae_train_hi_fi
+
+# data
+batch_size: 128
+val_fraction: 0.15
+num_workers: 2
+seed: 0
+loss_transform: log_clip
+loss_clip_floor: 1.0e-8
+
+# model
+z_dim: 128
+fourier_bands: 16
+f_min: 0.1
+f_max: 4.0
+residual_hidden: 128
+decoder_hidden_dims: [256, 128, 64]
+perf_hidden: 128
+
+# loss weights / ranking hyperparameters
+recon_weight: 1.0
+perf_weight: 1.0
+rank_weight: 0.3
+freq_decorr_weight: 0.05
+rho_weight: 1.0
+rank_margin: 0.5
+rank_gap: 0.25
+rank_topk: 8
+n_freq_bins: 8
+
+# optimization
+lr: 1.0e-4
+weight_decay: 1.0e-2
+n_epochs: 300
+
+# checkpointing
+save_every: 10
+resume_from: null

@@ -1,0 +1,62 @@
+# Ideal triangular cloak with the *symmetrized* transformation material.
+#
+# Single continuous forward FEM solve (no cells, no optimization): the
+# transformation-elasticity push-forward C_eff is computed analytically at every
+# quadrature point inside the cloak and then made minor-symmetric (Cauchy) via
+# the augmented-Voigt recipe `materials.symmetrize_stiffness` (symmetrize_cloak:
+# true). This is the ideal cloak material, but symmetrized so it is realisable
+# by a classical (non-Cosserat) medium — a baseline for the cell experiments.
+#
+# Usage:  python run.py configs/A_symmetrized.yaml
+
+is_reference: false
+geometry_type: triangular
+symmetrize_cloak: true
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+# Regime-B macro wave solve (docs/mesh_refinement_selection.md): quadratic TRI6
+# with the uniform-in-cloak builder. Same mesh as A_single_frequency/cells_10x8
+# so the symmetrized-ideal baseline is directly comparable to the cell designs.
+# lambda_R = lambda_star/f_star = 0.5; h_out ~ 0.147 (ppw_far ~ 3.4),
+# h_in ~ 0.037 (ppw_cloak ~ 13.6). The continuous material is smooth, so there
+# are no macro-cell jumps and the d_cell/2 rule does not bind.
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 60
+  ny_phys: 40
+  refinement_factor: 2
+  refinement_factor_outside: 0.5
+  ele_type: TRI6
+  builder: uniform_tri6
+  embed_macro_grid: false
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+output_dir: output/A_symmetrized

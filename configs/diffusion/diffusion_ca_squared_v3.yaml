@@ -1,0 +1,37 @@
+# v3: base_channels 128 (2x), val_frac 0.05, best-by-val_loss checkpointing
+
+# data
+h5_path: output/ca_bulk_squared/stiffness.h5
+scaler_dir: microstructure_generation_2d
+split_path: microstructure_generation_2d/split_v3.json
+val_frac: 0.05
+split_seed: 777
+
+# IO
+results_folder: output/diffusion_ca_squared
+name: v3
+seed: 777
+save_every_epoch: 5
+save_last: true
+continue_training: false
+
+# model
+image_size: 64
+base_channels: 128
+attention_resolutions: "8,4"
+with_attention: true
+num_heads: 4
+dropout: 0.1
+use_tensor_condition: true
+noise_schedule: cosine
+
+# training
+batch_size: 64
+lr: 1.0e-4
+lr_schedule: cosine
+optimizer_name: adam
+ema_rate: 0.9999
+training_epoch: 200
+gradient_clip_val: 1.0
+num_workers: 4
+precision: "32-true"

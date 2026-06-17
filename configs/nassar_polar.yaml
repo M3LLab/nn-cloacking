@@ -1,0 +1,50 @@
+# Nassar 2018 cloaking — polar cell decomposition
+# N sectors × M layers matching the physical lattice layout.
+#
+# Paper values: λ = μ = 2.5 MPa, R = 2.7 kg/m², ri = 50mm, rc = 150mm
+# Lattice: M = 22 layers, N = 75 sectors
+
+is_reference: false
+geometry_type: circular
+
+material:
+  rho0: 2.7
+  cs: 962.25
+
+circular_geometry:
+  ri: 0.050
+  rc: 0.150
+
+source:
+  source_type: plane_wave
+  wave_type: P
+  frequency_hz: 40000.0
+  x_src_factor: 0.15
+  sigma_factor: 1.0
+  F0: 1.0e8
+
+absorbing:
+  L_pml_factor: 2.0
+  xi_max: 4.0
+  pml_pow: 2
+  pml_all_sides: true
+
+mesh:
+  n_pml_x: 20
+  n_pml_y: 20
+  nx_phys: 160
+  ny_phys: 160
+  refinement_factor: 5
+  ele_type: TRI3
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+nassar:
+  enabled: true
+  polar: true
+  lattice_N: 75
+  lattice_M: 22
+
+output_dir: output/nassar_polar

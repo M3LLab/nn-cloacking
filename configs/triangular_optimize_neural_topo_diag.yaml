@@ -1,0 +1,77 @@
+# Lightweight diagnostic config for debugging convergence.
+# Copied from triangular_optimize_neural_topo.yaml with reduced mesh/pixels.
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 50
+  ny_phys: 50
+  refinement_factor: 5
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+cells:
+  enabled: true
+  n_x: 10
+  n_y: 10
+  n_C_params: 2
+  symmetrize_init: true
+
+loss:
+  tol: 1e-2
+
+optimization:
+  method: neural_topo
+  n_iters: 3
+  lr: 0.001
+  lambda_l2: 0.001
+  lambda_neighbor: 0.0
+  plot_every: 100
+  topo_neural:
+    hidden_size: 32
+    n_layers: 3
+    n_fourier: 16
+    seed: 42
+    pixel_per_cell: 3
+    simp_p: 1.1
+    E_cement: 30.0e9
+    nu_micro: 0.2
+    rho_cement: 2300.0
+    lambda_bin: 0.01
+    rho_weight: 0.0
+    dataset_path: output/dataset_30k.h5
+    output_scale: 1e-6
+    density_eps: 0.1
+
+output_dir: output/diag_topo

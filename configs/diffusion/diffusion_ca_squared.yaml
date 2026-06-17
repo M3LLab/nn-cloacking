@@ -1,0 +1,37 @@
+# Conditional diffusion over the ca_bulk_squared dataset (50x50 CA cells
+# padded to 64x64). Condition vector is (C11, C12, C66, vol).
+
+# data
+h5_path: output/ca_bulk_squared/stiffness.h5
+scaler_dir: microstructure_generation_2d
+split_path: microstructure_generation_2d/split.json
+val_frac: 0.02
+split_seed: 777
+
+# IO
+results_folder: output/diffusion_ca_squared
+name: v1
+seed: 777
+save_every_epoch: 5
+save_last: true
+continue_training: false
+
+# model
+image_size: 64
+base_channels: 64
+attention_resolutions: "8,4"
+with_attention: true
+num_heads: 4
+dropout: 0.1
+use_tensor_condition: true
+noise_schedule: linear
+
+# training
+batch_size: 64
+lr: 2.0e-4
+optimizer_name: adam
+ema_rate: 0.9999
+training_epoch: 100
+gradient_clip_val: 1.0
+num_workers: 4
+precision: "32-true"

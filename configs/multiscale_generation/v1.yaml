@@ -1,0 +1,30 @@
+# Multiscale generation run v1 — optimise the neural field during diffusion sampling.
+# Equivalent to:
+#   python -m multiscale_generation.optimize \
+#     --ckpt output/diffusion_ca_squared/v1_ortho/last.ckpt \
+#     --config output/cell20_flat4_materialreg_pt2/config.yaml \
+#     --init-weights output/cell20_flat4_materialreg_pt2/best_weights.npz \
+#     --nf-hidden 512 --nf-layers 6 --nf-fourier 64 \
+#     --steps 50 --lr 1e-3 --output-dir output/multiscale_generation_v1
+#
+# Run with:  python -m multiscale_generation.optimize --yaml configs/multiscale_generation/v1.yaml
+
+diffusion:
+  ckpt: output/diffusion_ca_squared/v1_ortho/last.ckpt
+  scaler_dir: microstructure_generation_2d
+  steps: 50            # diffusion steps == optimizer steps
+  tensor_w: 2.0
+
+cell_decomposition:
+  config_path: output/cell20_flat4_materialreg_pt2/config.yaml
+
+neural_field:
+  hidden_size: 512
+  n_layers: 6
+  n_fourier: 64
+  init_weights: output/cell20_flat4_materialreg_pt2/best_weights.npz
+
+optimize:
+  lr: 1.0e-3
+  refinement_factor: 25   # FEM mesh refinement (null => use the rayleigh config's value)
+  output_dir: output/multiscale_generation_v2

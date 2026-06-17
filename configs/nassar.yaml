@@ -1,0 +1,52 @@
+# Nassar 2018 cloaking simulation
+# "A degenerate polar lattice for cloaking in full 2D elastodynamics and statics"
+#
+# Setup: plane P-wave (40 kHz), circular void at domain centre,
+# PML on all four boundaries.
+#
+# Paper values: λ = μ = 2.5 MPa, R = 2.7 kg/m², ri = 50mm, rc = 150mm
+
+is_reference: false
+geometry_type: circular
+
+material:
+  # λ = μ = ρ₀ cs² = 2.5 MPa  →  cs = √(μ/ρ₀) = √(2.5e6 / 2.7) ≈ 962.25 m/s
+  rho0: 2.7          # kg/m² (plane stress, 2D)
+  cs: 962.25         # m/s
+
+circular_geometry:
+  ri: 0.050           # inner radius [m]
+  rc: 0.150           # outer radius [m]
+
+source:
+  source_type: plane_wave
+  wave_type: P
+  frequency_hz: 40000.0   # 40 kHz P-wave
+  x_src_factor: 0.15      # source line at x = 15% of physical width (away from PML)
+  sigma_factor: 1.0       # wide Gaussian (~1 wavelength) for plane-wave-like source
+  F0: 1.0e8              # scaled for meaningful displacement (~mm) with MPa stiffness
+
+absorbing:
+  L_pml_factor: 2.0
+  xi_max: 4.0
+  pml_pow: 2
+  pml_all_sides: true
+
+mesh:
+  n_pml_x: 20
+  n_pml_y: 20
+  nx_phys: 160
+  ny_phys: 160
+  refinement_factor: 5
+  ele_type: TRI3
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+
+nassar:
+  enabled: true
+  cell_n_x: 20
+  cell_n_y: 20
+
+output_dir: output/nassar

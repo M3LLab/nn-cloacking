@@ -1,0 +1,68 @@
+# Base config for surrogate dataset generation.
+#
+# Geometry, mesh, and cell grid are fixed.  The script sweeps over
+# frequencies and material parameters.
+#
+# Derived from cauchy_tri_top.yaml (same geometry/mesh/cell layout).
+# f_star here is a placeholder — the generation script overrides it.
+
+is_reference: false
+geometry_type: triangular
+
+material:
+  rho0: 1600.0
+  cs: 300.0
+
+domain:
+  f_star: 2.0          # placeholder, overridden per sample
+  lambda_star: 1.0
+  H_factor: 4.305
+  W_factor: 12.5
+
+geometry:
+  a_factor: 0.0774
+  b_factor: 3.0
+  c_factor: 0.1545
+
+absorbing:
+  L_pml_factor: 1.0
+  xi_max: 4.0
+  pml_pow: 2
+
+mesh:
+  n_pml_x: 32
+  n_pml_y: 32
+  nx_phys: 70
+  ny_phys: 40
+  refinement_factor: 3
+  ele_type: TRI3
+
+source:
+  x_src_factor: 0.05
+  sigma_factor: 0.01
+  F0: 1.0
+
+solver:
+  ksp_type: preonly
+  pc_type: lu
+  pc_factor_mat_solver_type: mumps
+
+cells:
+  enabled: true
+  n_x: 50
+  n_y: 50
+  n_C_params: 2
+  symmetrize_init: true
+
+loss:
+  type: top_surface
+
+# Optimization section only used for its defaults (the generation script
+# runs its own opt loop, not the solver's).
+optimization:
+  method: neural
+  n_iters: 100
+  lr: 0.005
+  plot_every: 0
+
+output_dir: output/surrogate_dataset
