@@ -36,6 +36,8 @@ CASES = [
      {"color": "black", "marker": "s", "ls": "--", "label": "Obstacle (no cloak)"}),
     ("frequency_sweep_ideal.csv",
      {"color": "C3", "marker": "o", "ls": "-", "label": "Ideal (analytic transform)"}),
+    ("frequency_sweep_symmetrized.csv",
+     {"color": "C4", "marker": "P", "ls": "-", "label": "Symmetrized-ideal (Cauchy)"}),
     ("frequency_sweep_optimized.csv",
      {"color": "C0", "marker": "D", "ls": "-", "label": "Optimized (continuous homogenised)"}),
     ("frequency_sweep_matched.csv",
