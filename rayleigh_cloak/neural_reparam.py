@@ -184,6 +184,10 @@ class NeuralReparam:
     kappa: float = 0.95
     cap_anisotropy: bool = True
     anisotropy_log_ratio: float = math.log(15.0)  # log(R) for the anisotropy cap
+    # When True (with n_C_params=6), decode via a PD Cholesky factor of the
+    # anisotropic-Cauchy Voigt 3×3 instead of the flat4 orthotropic decode —
+    # keeps C PD while letting the C16/C26 coupling move off a zero init.
+    aniso_cauchy: bool = False
 
     def decode(self, theta: list[dict]) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Map MLP weights → (cell_C_flat, cell_rho).
@@ -213,6 +217,48 @@ class NeuralReparam:
         n_C = self.C_flat_init.shape[1]
         s = self.output_scale
         mask = self.cloak_mask
+
+        if self.constrained and self.aniso_cauchy and n_C == 6:
+            # Anisotropic-Cauchy (flat6cauchy [C11,C22,C66,C12,C16,C26]) PD decode.
+            # Factor the Voigt 3×3 M=[[C11,C12,C16],[C12,C22,C26],[C16,C26,C66]]
+            # as M = L Lᵀ (Cholesky). raw=0 recovers C_init exactly; C is PD for
+            # any L with positive diagonal, and the ADDITIVE off-diagonals let the
+            # coupling C16/C26 move away from a zero (on-axis orthotropic) init —
+            # which the multiplicative legacy decode cannot do.
+            Ci = self.C_flat_init
+            C11i, C22i, C66i = Ci[:, 0], Ci[:, 1], Ci[:, 2]
+            C12i, C16i, C26i = Ci[:, 3], Ci[:, 4], Ci[:, 5]
+            Minit = jnp.stack([
+                jnp.stack([C11i, C12i, C16i], axis=-1),
+                jnp.stack([C12i, C22i, C26i], axis=-1),
+                jnp.stack([C16i, C26i, C66i], axis=-1),
+            ], axis=-2)                                  # (n_cells, 3, 3)
+            Linit = jnp.linalg.cholesky(Minit)           # lower factor
+            d0, d1, d2 = Linit[:, 0, 0], Linit[:, 1, 1], Linit[:, 2, 2]
+            o10, o20, o21 = Linit[:, 1, 0], Linit[:, 2, 0], Linit[:, 2, 1]
+
+            # positive diagonal in log-space; additive off-diagonal scaled by the
+            # geomean of the connected init diagonals (commensurate step size).
+            L00 = d0 * jnp.exp(s * raw[:, 0])
+            L11 = d1 * jnp.exp(s * raw[:, 1])
+            L22 = d2 * jnp.exp(s * raw[:, 2])
+            L10 = o10 + s * raw[:, 3] * jnp.sqrt(d0 * d1)
+            L20 = o20 + s * raw[:, 4] * jnp.sqrt(d0 * d2)
+            L21 = o21 + s * raw[:, 5] * jnp.sqrt(d1 * d2)
+
+            C11 = L00 * L00
+            C22 = L10 * L10 + L11 * L11
+            C66 = L20 * L20 + L21 * L21 + L22 * L22
+            C12 = L00 * L10
+            C16 = L00 * L20
+            C26 = L10 * L20 + L11 * L21
+
+            cell_C_c = jnp.stack([C11, C22, C66, C12, C16, C26], axis=-1)
+            cell_rho_c = self.rho_init * jnp.exp(s * raw[:, n_C])
+
+            cell_C = jnp.where(mask[:, None], cell_C_c, self.C_flat_init)
+            cell_rho = jnp.where(mask, cell_rho_c, self.rho_init)
+            return (cell_C, cell_rho)
 
         if self.constrained and n_C == 4:
             C11i = self.C_flat_init[:, 0]
@@ -277,6 +323,7 @@ def make_neural_reparam(
     kappa: float = 0.95,
     cap_anisotropy: bool = True,
     anisotropy_ratio: float = 15.0,
+    aniso_cauchy: bool = False,
 ) -> tuple[list[dict], NeuralReparam]:
     """Create a NeuralReparam and initialize the MLP weights.
 
@@ -319,6 +366,7 @@ def make_neural_reparam(
         kappa=kappa,
         cap_anisotropy=cap_anisotropy,
         anisotropy_log_ratio=math.log(anisotropy_ratio),
+        aniso_cauchy=aniso_cauchy,
     )
 
     return theta, reparam

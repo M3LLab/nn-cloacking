@@ -91,7 +91,10 @@ class RayleighCloakProblem(Problem):
             # Nassar parameterization: cell_C_flat is (n_cells, 5)
             cell_C_full, cell_rho = nassar_mat.params_to_C_full(params)
         else:
-            _, from_flat = _get_converters(type(self)._n_C_params)
+            _, from_flat = _get_converters(
+                type(self)._n_C_params,
+                getattr(type(self), '_aniso_cauchy', False),
+            )
             cell_C_full = jax.vmap(from_flat)(cell_C_flat)  # (n_cells, 2,2,2,2)
 
         # Expand to quadrature points via precomputed mapping
@@ -270,6 +273,7 @@ def build_problem(
         "_cell_decomp":  cell_decomp,
         "_confine_to_cloak": cfg.cells.confine_to_cloak,
         "_n_C_params":   n_C_params_override or cfg.cells.n_C_params,
+        "_aniso_cauchy": cfg.cells.aniso_cauchy,
         "_source_type":  cfg.source.source_type,
         "_wave_type":    cfg.source.wave_type,
         "_lam_param":    params.lam,

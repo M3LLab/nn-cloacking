@@ -160,6 +160,7 @@ def main() -> None:
 
     with h5py.File(args.input, "r") as f:
         C11 = f["C11"][:]
+        C22 = f["C22"][:]
         C12 = f["C12"][:]
         C66 = f["C66"][:]
         vol = f["vol"][:]
@@ -168,17 +169,19 @@ def main() -> None:
     print("Statistics")
     print("-" * 90)
     for name, arr, unit in [("C11", C11, "Pa"),
+                              ("C22", C22, "Pa"),
                               ("C12", C12, "Pa"),
                               ("C66", C66, "Pa"),
                               ("vol", vol, "-")]:
         print(_stats(name, arr, unit))
     print("-" * 90)
 
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    fig, axes = plt.subplots(1, 5, figsize=(25, 5))
     _plot_hist(axes[0], C11, r"$C_{11}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
-    _plot_hist(axes[1], C12, r"$C_{12}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
-    _plot_hist(axes[2], C66, r"$C_{66}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
-    _plot_hist(axes[3], vol, r"vol-frac",  "",   log_x=False,     bins=args.bins, nonzero_only=False)
+    _plot_hist(axes[1], C22, r"$C_{22}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
+    _plot_hist(axes[2], C12, r"$C_{12}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
+    _plot_hist(axes[3], C66, r"$C_{66}$", "Pa",  log_x=args.log, bins=args.bins, nonzero_only=False)
+    _plot_hist(axes[4], vol, r"vol-frac",  "",   log_x=False,     bins=args.bins, nonzero_only=False)
 
     fig.suptitle(f"Stiffness parameter distributions — {args.input.name}", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.96))

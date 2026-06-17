@@ -123,6 +123,8 @@ def generate_mesh(
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
 
     gmsh.model.mesh.generate(2)
+    if cfg.mesh.ele_type == "TRI6":
+        gmsh.model.mesh.setOrder(2)
 
     os.makedirs(cfg.output_dir, exist_ok=True)
     msh_path = os.path.join(cfg.output_dir, "_cloak_mesh.msh")
@@ -131,7 +133,7 @@ def generate_mesh(
 
     msh = meshio.read(msh_path)
     points = msh.points[:, :2]
-    cells = msh.cells_dict["triangle"]
+    cells = msh.cells_dict["triangle6" if cfg.mesh.ele_type == "TRI6" else "triangle"]
 
     return Mesh(points, cells, ele_type=cfg.mesh.ele_type)
 
@@ -404,6 +406,11 @@ def generate_mesh_full(
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
 
     gmsh.model.mesh.generate(2)
+    # Quadratic (TRI6) elements: add mid-edge nodes so the wave field is
+    # represented with second-order accuracy (linear TRI3 fails to converge for
+    # the pixel-level microstructure validation).
+    if cfg.mesh.ele_type == "TRI6":
+        gmsh.model.mesh.setOrder(2)
 
     os.makedirs(cfg.output_dir, exist_ok=True)
     msh_path = os.path.join(cfg.output_dir, "_cloak_mesh_full.msh")
@@ -412,7 +419,7 @@ def generate_mesh_full(
 
     msh = meshio.read(msh_path)
     points = msh.points[:, :2]
-    cells = msh.cells_dict["triangle"]
+    cells = msh.cells_dict["triangle6" if cfg.mesh.ele_type == "TRI6" else "triangle"]
 
     return Mesh(points, cells, ele_type=cfg.mesh.ele_type)
 

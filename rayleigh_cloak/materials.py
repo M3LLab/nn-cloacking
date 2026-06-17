@@ -165,6 +165,74 @@ def flat6_to_C(flat: jnp.ndarray) -> jnp.ndarray:
     C = C.at[1, 0, 0, 1].set(flat[5])
     return C
 
+# ── 6-param anisotropic Cauchy (EXACTLY the symmetrized-triangle class) ──
+#
+# Minimal lossless parametrisation of a 2-D minor+major-symmetric (Cauchy)
+# stiffness — the symmetric Voigt 3×3
+#       [[C11, C12, C16],
+#        [C12, C22, C26],
+#        [C16, C26, C66]]
+# This is the material class produced by ``symmetrize_stiffness`` (the
+# symmetrized triangular cloak): it keeps the normal–shear COUPLING C16, C26
+# and enforces a SYMMETRIC shear block (C66 = C6̄6̄ = C66̄). It differs from
+#   * flat4  — orthotropic Cauchy, forces C16 = C26 = 0;
+#   * flat6  — block-diagonal Cosserat, also drops C16/C26 but allows shear
+#              asymmetry (C66 ≠ C6̄6̄).
+# Unlike flat10 (which also admits non-symmetric Cosserat tensors), flat6cauchy
+# is EXACTLY the Cauchy class — so optimising in it stays in the same material
+# family as symmetrization. Layout extends flat4: the first four entries are
+# identical to ``C_to_flatC`` [C11, C22, C66, C12], with the two coupling
+# terms appended.
+
+# minor+major-symmetric index partners for each of C16 (11↔12) and C26 (22↔12).
+_C16_PARTNERS = [(0, 0, 0, 1), (0, 0, 1, 0), (0, 1, 0, 0), (1, 0, 0, 0)]
+_C26_PARTNERS = [(1, 1, 0, 1), (1, 1, 1, 0), (0, 1, 1, 1), (1, 0, 1, 1)]
+_C66_PARTNERS = [(0, 1, 0, 1), (1, 0, 1, 0), (0, 1, 1, 0), (1, 0, 0, 1)]
+
+
+def C_to_flat6cauchy(C: jnp.ndarray) -> jnp.ndarray:
+    """Convert (2,2,2,2) tensor to the 6-param anisotropic-Cauchy flat array.
+
+        flat = [C11, C22, C66, C12, C16, C26]
+             = [C0000, C1111, C0101, C0011, C0001, C1101]
+
+    The first four entries match ``C_to_flatC`` (flat4); the last two are the
+    normal–shear coupling terms that flat4 drops.
+    """
+    return jnp.array([
+        C[0, 0, 0, 0],  # C11
+        C[1, 1, 1, 1],  # C22
+        C[0, 1, 0, 1],  # C66
+        C[0, 0, 1, 1],  # C12
+        C[0, 0, 0, 1],  # C16  (11–12 normal–shear coupling)
+        C[1, 1, 0, 1],  # C26  (22–12 normal–shear coupling)
+    ])
+
+
+def flat6cauchy_to_C(flat: jnp.ndarray) -> jnp.ndarray:
+    """Convert the 6-param anisotropic-Cauchy flat array to (2,2,2,2) tensor.
+
+    Reconstructs the full minor+major-symmetric tensor: the shear block is
+    symmetric (single C66 on all four shear slots) and the coupling terms
+    C16, C26 populate all their minor/major partners. Round-trips
+    ``symmetrize_stiffness`` output exactly.
+    """
+    C11, C22, C66, C12, C16, C26 = (flat[0], flat[1], flat[2],
+                                    flat[3], flat[4], flat[5])
+    C = jnp.zeros((2, 2, 2, 2))
+    C = C.at[0, 0, 0, 0].set(C11)
+    C = C.at[1, 1, 1, 1].set(C22)
+    C = C.at[0, 0, 1, 1].set(C12)
+    C = C.at[1, 1, 0, 0].set(C12)
+    for (a, b, c, d) in _C66_PARTNERS:
+        C = C.at[a, b, c, d].set(C66)
+    for (a, b, c, d) in _C16_PARTNERS:
+        C = C.at[a, b, c, d].set(C16)
+    for (a, b, c, d) in _C26_PARTNERS:
+        C = C.at[a, b, c, d].set(C26)
+    return C
+
+
 # ── 10-param (symmetric augmented Voigt, full Cosserat) ──────────────
 
 # Upper-triangle indices of the symmetric 4×4 augmented Voigt matrix.
@@ -293,7 +361,7 @@ from rayleigh_cloak.cells import CellDecomposition
 
 # ── flat↔tensor converters keyed by n_C_params ───────────────────────
 
-def _get_converters(n_C_params: int):
+def _get_converters(n_C_params: int, aniso_cauchy: bool = False):
     """Return ``(to_flat, from_flat)`` functions for the chosen parameterisation.
 
     Supported values:
@@ -302,7 +370,11 @@ def _get_converters(n_C_params: int):
       parameterisation for tensors with major symmetry.  Preserves all
       Cosserat components including normal-shear coupling.
     * **6** — block-diagonal Cosserat.  Captures the normal block and the
-      full 2×2 shear block but drops normal-shear coupling.
+      full 2×2 shear block but drops normal-shear coupling.  When
+      ``aniso_cauchy=True`` this instead selects the 6-param anisotropic
+      **Cauchy** form (``flat6cauchy``: [C11,C22,C66,C12,C16,C26]) — exactly
+      the symmetrized-triangle material class (symmetric shear + C16/C26
+      coupling).
     * **16** — full augmented 4×4 Voigt (most general, redundant with
       major symmetry).
     * **4** — minor-symmetric shear (deprecated, produces rank-3 Voigt →
@@ -320,6 +392,8 @@ def _get_converters(n_C_params: int):
         )
         return C_to_flatC, flatC_to_C
     if n_C_params == 6:
+        if aniso_cauchy:
+            return C_to_flat6cauchy, flat6cauchy_to_C
         return C_to_flat6, flat6_to_C
     if n_C_params == 10:
         return C_to_flat10, flat10_to_C
@@ -357,6 +431,7 @@ class CellMaterial:
         symmetrize_init: bool = False,
         init: Literal["pushforward", "homogeneous", "dataset_centroid"] = "pushforward",
         init_path: str | Path | None = None,
+        aniso_cauchy: bool = False,
     ):
         self.geometry = geometry
         self.C0 = C0
@@ -366,7 +441,8 @@ class CellMaterial:
         self.symmetrize_init = symmetrize_init
         self.init = init
         self.init_path = init_path
-        self.to_flat, self.from_flat = _get_converters(n_C_params)
+        self.aniso_cauchy = aniso_cauchy
+        self.to_flat, self.from_flat = _get_converters(n_C_params, aniso_cauchy)
 
         self.cell_C_flat, self.cell_rho = self._initialize()
 
