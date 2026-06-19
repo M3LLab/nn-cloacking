@@ -74,6 +74,9 @@ def main() -> None:
         num_res_blocks=cfg.get("num_res_blocks", 1),
         parameterization=cfg.get("parameterization", "x0"),
         min_snr_gamma=cfg.get("min_snr_gamma", 0.0),
+        reweight=cfg.get("reweight", None),
+        reweight_bins=cfg.get("reweight_bins", 50),
+        reweight_clip=cfg.get("reweight_clip", 0.0),
     )
     model = DiffusionModel(**model_kwargs)
 
