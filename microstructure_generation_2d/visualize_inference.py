@@ -264,6 +264,9 @@ def main() -> None:
     parser.add_argument("--h5", default="output/ca_bulk_squared/stiffness.h5")
     parser.add_argument("--scaler-dir", default="microstructure_generation_2d")
     parser.add_argument("--split-path", default="microstructure_generation_2d/split.json")
+    parser.add_argument("--val-frac", type=float, default=0.02,
+                        help="val_frac passed to load_or_make_split; must match the split "
+                             "file's val_frac (e.g. 0.05 for dataset/splits/split_v1.json).")
     parser.add_argument("--source", choices=("val", "train"), default="val",
                         help="Which split partition to draw conditions from")
     parser.add_argument("--num", type=int, default=6, help="Number of conditions")
@@ -289,7 +292,7 @@ def main() -> None:
     with h5py.File(args.h5, "r") as f:
         n_total = f["cells"].shape[0]
     split = load_or_make_split(
-        n=n_total, val_frac=0.02, seed=777, split_path=Path(args.split_path),
+        n=n_total, val_frac=args.val_frac, seed=777, split_path=Path(args.split_path),
     )
     indices = args.indices if args.indices else _pick_indices(
         split, args.num, args.source, args.seed,

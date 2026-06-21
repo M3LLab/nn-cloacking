@@ -82,12 +82,27 @@ def make_split(n: int, val_frac: float, seed: int, out_path: Path) -> dict:
 
 
 def load_or_make_split(n: int, val_frac: float, seed: int, split_path: Path) -> dict:
+    """Load the split at ``split_path`` if it matches, else create it ONLY if absent.
+
+    A materialized split is immutable: if the file exists but its
+    ``(n, seed, val_frac)`` don't match the request, we raise instead of silently
+    regenerating and overwriting it. Overwriting an in-use split (e.g. pointing a
+    val_frac=0.02 eval at a val_frac=0.05 training split) destroys the held-out
+    set and reshuffles rows that a model already trained on. Pass a different
+    ``--split-path`` (or delete the file deliberately) to make a new split.
+    """
     if split_path.exists():
         with open(split_path) as f:
             sp = json.load(f)
         if sp["n"] == n and sp["seed"] == seed and abs(sp["val_frac"] - val_frac) < 1e-9:
             return sp
-        # n/seed/val_frac mismatch: regenerate
+        raise ValueError(
+            f"Split file {split_path} holds (n={sp['n']}, val_frac={sp['val_frac']}, "
+            f"seed={sp['seed']}) but the caller requested (n={n}, val_frac={val_frac}, "
+            f"seed={seed}). Refusing to overwrite a materialized split. Pass a different "
+            f"split_path, fix the requested params (often a wrong val_frac), or delete "
+            f"the file to regenerate it deliberately."
+        )
     return make_split(n, val_frac, seed, split_path)
 
 
