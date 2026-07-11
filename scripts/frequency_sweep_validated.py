@@ -261,6 +261,7 @@ def build_canvas(
     dataset_h5: Path,
     config_path: Path,
     rho_weight: float = 1.0,
+    feature_weights: np.ndarray | None = None,
 ):
     """Match cloak cells to dataset entries and build the tiled binary canvas.
 
@@ -315,15 +316,33 @@ def build_canvas(
 
     mean = X_ds.mean(axis=0)
     std = X_ds.std(axis=0)
-    Xs_ds = (X_ds - mean) / std
-    Xs_ds[:, -1] *= rho_weight                    # ρ is always the last column
+
+    # Per-component weights applied in standardised (z-score) matching space.
+    # Order matches X_ds columns: (λ, μ, ρ) for n_C=2 or (C11, C22, C66, C12, ρ)
+    # for n_C=4. Up-weighting a component makes the NN match it more closely at
+    # the expense of the others. ``rho_weight`` is folded into the last (ρ)
+    # column for back-compat.
+    n_feat = X_ds.shape[1]
+    if feature_weights is None:
+        w = np.ones(n_feat, dtype=np.float64)
+    else:
+        w = np.asarray(feature_weights, dtype=np.float64).ravel()
+        if w.shape != (n_feat,):
+            order = "λ, μ, ρ" if n_C == 2 else "C11, C22, C66, C12, ρ"
+            raise SystemExit(
+                f"feature_weights needs {n_feat} values for n_C_params={n_C} "
+                f"(order: {order}); got {w.shape[0]}"
+            )
+        w = w.copy()
+    w[-1] *= rho_weight                            # ρ is always the last column
+
+    Xs_ds = (X_ds - mean) / std * w
 
     if n_C == 2:
         X_q = np.column_stack([cell_C_flat[:, 0], cell_C_flat[:, 1], cell_rho])
     else:
         X_q = np.column_stack([cell_C_flat, cell_rho])
-    Xs_q = (X_q[cloak_indices] - mean) / std
-    Xs_q[:, -1] *= rho_weight
+    Xs_q = (X_q[cloak_indices] - mean) / std * w
 
     # Brute-force NN — cheap at ~100 × 150k.
     a2 = np.sum(Xs_q ** 2, axis=1, keepdims=True)
@@ -368,6 +387,7 @@ def build_canvas(
         "match_d_max": float(cloak_match_d.max()),
         "n_unique_dataset_entries": int(unique_idx.size),
         "n_C_params": int(n_C),
+        "feature_weights": w.tolist(),
     }
     return canvas, (n_x, n_y), (H, W), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag
 
@@ -378,6 +398,7 @@ def build_canvas_from_cell_designs(
     config_path: Path,
     cell_designs_dir: Path,
     rho_weight: float = 1.0,
+    feature_weights: np.ndarray | None = None,
 ):
     """Like ``build_canvas`` but tile the INVERSE-DESIGNED microstructures
     (``cell_designs/cell_XXX/canvas.npy``) instead of the raw nearest-dataset
@@ -391,6 +412,7 @@ def build_canvas_from_cell_designs(
     (canvas, (n_x, n_y), (H, W), cloak_bbox,
      matched_cell_C_flat, matched_cell_rho, diag) = build_canvas(
         optimized_params_npz, dataset_h5, config_path, rho_weight=rho_weight,
+        feature_weights=feature_weights,
     )
 
     cloak_mask, _centers, _info = _build_cloak_mask(config_path, n_x, n_y)
@@ -655,6 +677,14 @@ def main() -> None:
                    help="E_void / E_cement ratio for ersatz-material void.")
     p.add_argument("--rho-weight", type=float, default=1.0,
                    help="Weight on standardised ρ in the matching distance.")
+    p.add_argument("--feature-weights", type=str, default=None,
+                   help="Comma-separated per-component weights applied in the "
+                        "standardised (z-score) matching distance. Order is "
+                        "'λ,μ,ρ' for n_C_params=2 or 'C11,C22,C66,C12,ρ' for "
+                        "n_C_params=4. Up-weight a component to match it more "
+                        "closely (e.g. '1,1,8,1,1' to prioritise shear C66). "
+                        "Composes multiplicatively with --rho-weight on the ρ "
+                        "column. Default: all ones (plain standardised L2).")
     p.add_argument("--cell-designs", type=Path, default=None,
                    help="Directory of inverse-designed cells (cell_XXX/canvas.npy + "
                         "weights.npz). When given, tile THESE microstructures (and use "
@@ -675,6 +705,12 @@ def main() -> None:
     out_dir = Path(args.output_dir) if args.output_dir else Path(args.params).parent
     out_dir.mkdir(exist_ok=True, parents=True)
 
+    feature_weights = None
+    if args.feature_weights is not None:
+        feature_weights = np.array(
+            [float(x) for x in args.feature_weights.split(",")], dtype=np.float64
+        )
+
     csv_paths = {
         "obstacle":  out_dir / "frequency_sweep_obstacle.csv",
         "ideal":     out_dir / "frequency_sweep_ideal.csv",
@@ -690,21 +726,24 @@ def main() -> None:
             build_canvas_from_cell_designs(
                 Path(args.params), Path(args.dataset), Path(args.config),
                 Path(args.cell_designs), rho_weight=args.rho_weight,
+                feature_weights=feature_weights,
             )
         )
     else:
         print("=== Matching cloak cells & assembling canvas (nearest dataset cell) ===")
         canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, matched_cell_C_flat, matched_cell_rho, diag = build_canvas(
             Path(args.params), Path(args.dataset), Path(args.config),
-            rho_weight=args.rho_weight,
+            rho_weight=args.rho_weight, feature_weights=feature_weights,
         )
     print(
         f"canvas shape: {canvas.shape}  ({n_y}×{H_pix}, {n_x}×{W_pix})  "
         f"cloak cells: {diag['n_cloak']}/{diag['n_cells']}  "
         f"unique dataset entries used: {diag['n_unique_dataset_entries']}\n"
-        f"match-distance (std-L2): median={diag['match_d_median']:.3f}, "
+        f"match-distance (weighted std-L2): median={diag['match_d_median']:.3f}, "
         f"mean={diag['match_d_mean']:.3f}, max={diag['match_d_max']:.3f}  "
-        f"(n_C_params={diag['n_C_params']})"
+        f"(n_C_params={diag['n_C_params']})\n"
+        f"feature weights (order {'λ,μ,ρ' if diag['n_C_params']==2 else 'C11,C22,C66,C12,ρ'}): "
+        f"{['%.3g' % v for v in diag['feature_weights']]}"
     )
 
     solver_opts = {

@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 
 from dataset.cellular_chiral.diffusion_dataset import (
     CABulkDiffusionDataset,
+    inverse_density_weights,
     load_or_make_split,
 )
 
@@ -55,6 +56,9 @@ class DiffusionModel(LightningModule):
         num_res_blocks: int = 1,
         parameterization: str = "x0",
         min_snr_gamma: float = 0.0,
+        reweight: str | None = None,
+        reweight_bins: int = 50,
+        reweight_clip: float = 0.0,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -102,6 +106,12 @@ class DiffusionModel(LightningModule):
         self.val_frac = val_frac
         self.split_seed = split_seed
         self._split = None
+        # Loss reweighting: flatten the training distribution along an h5 column
+        # (e.g. "vf"). None -> uniform (legacy behaviour).
+        self.reweight = reweight
+        self.reweight_bins = reweight_bins
+        self.reweight_clip = reweight_clip
+        self._weights = None
 
     # ------------------------------------------------------------------ EMA --
     def reset_parameters(self):
@@ -134,7 +144,29 @@ class DiffusionModel(LightningModule):
             )
         return self._split
 
-    def _loader(self, indices, shuffle: bool, cfg_dropout: bool) -> DataLoader:
+    def _sample_weights(self):
+        """Full-length (n_h5,) per-row train weights that flatten ``self.reweight``.
+
+        Only training rows are reweighted; all other rows get weight 1.0.
+        """
+        if self.reweight is None:
+            return None
+        if self._weights is None:
+            import h5py
+            import numpy as np
+            train_idx = np.asarray(self._split_dict()["train"], dtype=np.int64)
+            with h5py.File(self.h5_path, "r") as f:
+                n = f["cells"].shape[0]
+                vals = f[self.reweight][:]
+            w = np.ones(n, dtype=np.float32)
+            w[train_idx] = inverse_density_weights(
+                vals[train_idx], bins=self.reweight_bins, clip=self.reweight_clip
+            )
+            self._weights = w
+        return self._weights
+
+    def _loader(self, indices, shuffle: bool, cfg_dropout: bool,
+                weighted: bool = False) -> DataLoader:
         ds = CABulkDiffusionDataset(
             h5_path=self.h5_path,
             scaler_dir=self.scaler_dir,
@@ -142,6 +174,7 @@ class DiffusionModel(LightningModule):
             cfg_dropout=cfg_dropout,
             compressed=self.compressed,
             padded_size=self.hparams.image_size if self.compressed else 0,
+            sample_weights=self._sample_weights() if weighted else None,
         )
         return DataLoader(
             ds, batch_size=self.batch_size, shuffle=shuffle,
@@ -150,7 +183,8 @@ class DiffusionModel(LightningModule):
         )
 
     def train_dataloader(self):
-        return self._loader(self._split_dict()["train"], shuffle=True, cfg_dropout=True)
+        return self._loader(self._split_dict()["train"], shuffle=True, cfg_dropout=True,
+                            weighted=True)
 
     def val_dataloader(self):
         return self._loader(self._split_dict()["val"], shuffle=False, cfg_dropout=False)
@@ -159,7 +193,9 @@ class DiffusionModel(LightningModule):
     def training_step(self, batch, batch_idx):
         occupancy = batch["occupancy"]
         tensor_feature = batch["tensor_feature"] if self.use_tensor_condition else None
-        loss = self.model.training_loss(occupancy, tensor_feature).mean()
+        loss = self.model.training_loss(
+            occupancy, tensor_feature, sample_weight=batch.get("weight")
+        )
 
         self.log("loss", loss.detach().item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
         opt = self.optimizers()

@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import signal
 from pathlib import Path
 
 import h5py
@@ -86,13 +87,51 @@ def _decode_to_50(arr: np.ndarray, compressed: bool) -> np.ndarray:
     return _crop(arr)
 
 
-def _run_fem(cell_uint8: np.ndarray) -> tuple[float, float, float, float, float]:
+def _run_fem(cell_uint8: np.ndarray, method: str = "hifi",
+             mesh_N: int = 100, ele_type: str = "TRI6"
+             ) -> tuple[float, float, float, float, float]:
+    """Homogenize a generated cell with the SAME backend the dataset was built with.
+
+    The dataset's target/NN stiffness values were computed with the hi-fi
+    homogenizer (TRI6 @ mesh_N=100 for ca_squared_2m); measuring generated cells
+    with the legacy TRI3@1-elem/pixel solver would inject a systematic FEM bias
+    into every generated-vs-target comparison. The caller passes method / mesh_N
+    / ele_type read from the h5's homog_* attrs so the two always match.
+    """
     from dataset.cellular_chiral.bulk_stiffness import (
-        _compute_stiffness, _ortho_params_from_C,
+        _stiffness, _ortho_params_from_C, RHO_CEMENT,
     )
-    C, _, vf = _compute_stiffness(cell_uint8.astype(np.int8))
+    C, _, vf = _stiffness(cell_uint8.astype(np.int8), RHO_CEMENT,
+                          method=method, mesh_N=mesh_N, ele_type=ele_type)
     C11, C22, C12, C66 = _ortho_params_from_C(C)
     return float(C11), float(C22), float(C12), float(C66), float(vf)
+
+
+class _FemTimeout(Exception):
+    pass
+
+
+def _run_fem_timed(cell_uint8: np.ndarray, method: str, mesh_N: int,
+                   ele_type: str, timeout: float):
+    """``_run_fem`` with a hard wall-clock cap; returns None on timeout or error.
+
+    Uses SIGALRM (main thread, Unix). The hi-fi homogenizer regularizes the void
+    phase, so its system is non-singular and the solve is finite -- the timeout
+    is defense-in-depth against a pathologically slow cell rather than a true
+    native hang. Any solver exception is also swallowed and counted as a miss.
+    """
+    def _on_alarm(signum, frame):
+        raise _FemTimeout()
+
+    old = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        return _run_fem(cell_uint8, method=method, mesh_N=mesh_N, ele_type=ele_type)
+    except (_FemTimeout, Exception):  # noqa: BLE001
+        return None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
 
 
 def _load_train_features(
@@ -192,6 +231,41 @@ def _save_image(
     plt.close(fig)
 
 
+def _subsample_vol_uniform(
+    val_indices: np.ndarray,
+    h5_path: str,
+    n_pick: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Pick ``n_pick`` val indices spread evenly across the vol range.
+
+    The vol range [min, max] is split into ``n_pick`` equal-width bins and one
+    sample is drawn (at random, via ``rng``) from each non-empty bin, so soft
+    and stiff cells are equally represented instead of following the dataset's
+    vol density.  If some bins are empty (sparse vol regions), the shortfall is
+    backfilled with random unused indices to still return ``n_pick`` points.
+    """
+    with h5py.File(h5_path, "r") as f:
+        vol = np.asarray(f["vol"])[val_indices].astype(np.float64)
+
+    edges = np.linspace(vol.min(), vol.max(), n_pick + 1)
+    # bin id in [0, n_pick-1]; the max-vol sample lands in the last bin
+    bin_id = np.clip(np.digitize(vol, edges[1:-1]), 0, n_pick - 1)
+
+    chosen: list[int] = []
+    for b in range(n_pick):
+        members = np.flatnonzero(bin_id == b)
+        if members.size:
+            chosen.append(int(val_indices[rng.choice(members)]))
+
+    if len(chosen) < n_pick:
+        remaining = np.setdiff1d(val_indices, np.asarray(chosen, dtype=val_indices.dtype))
+        extra = rng.choice(remaining, size=n_pick - len(chosen), replace=False)
+        chosen.extend(int(x) for x in extra)
+
+    return np.asarray(chosen, dtype=val_indices.dtype)
+
+
 def _load_done_ids(csv_path: Path) -> set[int]:
     if not csv_path.exists():
         return set()
@@ -217,6 +291,10 @@ def main() -> None:
     parser.add_argument("--h5", default="output/ca_bulk_squared/stiffness.h5")
     parser.add_argument("--scaler-dir", default="microstructure_generation_2d")
     parser.add_argument("--split-path", default="microstructure_generation_2d/split.json")
+    parser.add_argument("--val-frac", type=float, default=0.02,
+                        help="val_frac passed to load_or_make_split. Must match the split "
+                             "file's val_frac, otherwise the split is regenerated and the "
+                             "file overwritten (e.g. use 0.05 for split_v1.json).")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--tensor-w", type=float, default=2.0)
@@ -227,10 +305,20 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--val-limit", type=int, default=None,
-                        help="Randomly subsample this many val points (reproducible via --seed).")
+                        help="Subsample this many val points (reproducible via --seed). "
+                             "See --val-sampling for how they are chosen.")
+    parser.add_argument("--val-sampling", choices=["random", "vol-uniform"],
+                        default="random",
+                        help="How --val-limit selects points: 'random' draws uniformly at "
+                             "random; 'vol-uniform' spreads them evenly across the vol range "
+                             "(equal-width vol bins, one sample per bin) so soft and stiff "
+                             "cells are equally represented.")
     parser.add_argument("--diffusion-samples", type=int, default=1,
                         help="Number of diffusion samples to generate per val point; "
                              "the one whose FEM stiffness is closest to the target is kept.")
+    parser.add_argument("--fem-timeout", type=float, default=120.0,
+                        help="Per-cell hi-fi FEM timeout (s). A wedged solve is killed "
+                             "and that sample counted as a miss.")
     args = parser.parse_args()
 
     out_dir   = Path(args.output_dir)
@@ -251,13 +339,19 @@ def main() -> None:
     with h5py.File(args.h5, "r") as f:
         n_total = f["cells"].shape[0]
     split = load_or_make_split(
-        n=n_total, val_frac=0.02, seed=777, split_path=Path(args.split_path),
+        n=n_total, val_frac=args.val_frac, seed=777, split_path=Path(args.split_path),
     )
     val_indices   = split["val"]
     train_indices = split["train"]
     if args.val_limit is not None:
         rng = np.random.default_rng(args.seed)
-        val_indices = rng.choice(val_indices, size=min(args.val_limit, len(val_indices)), replace=False)
+        n_pick = min(args.val_limit, len(val_indices))
+        if args.val_sampling == "vol-uniform":
+            val_indices = _subsample_vol_uniform(
+                np.asarray(val_indices), args.h5, n_pick, rng,
+            )
+        else:
+            val_indices = rng.choice(val_indices, size=n_pick, replace=False)
         val_indices = np.sort(val_indices)  # keep h5 access sequential
 
     print(f"Val samples : {len(val_indices)}")
@@ -292,6 +386,15 @@ def main() -> None:
     writer   = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
     if not done_ids:
         writer.writeheader()
+
+    # ---- FEM backend: match the dataset's homogenizer (avoid fidelity mismatch) ----
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")  # FEM on CPU; GPU stays free for diffusion
+    with h5py.File(args.h5, "r") as _f:
+        homog_method = str(_f.attrs.get("homog_method", "hifi"))
+        homog_mesh_N = int(_f.attrs.get("homog_mesh_N", 100))
+        homog_ele    = str(_f.attrs.get("homog_ele_type", "TRI6"))
+    print(f"FEM eval backend: method={homog_method} ele_type={homog_ele} "
+          f"mesh_N={homog_mesh_N}  (from dataset homog_* attrs)")
 
     # ---- main loop ----
     with h5py.File(args.h5, "r") as h5:
@@ -332,10 +435,18 @@ def main() -> None:
                     )
                 arr       = img.cpu().numpy().squeeze()
                 candidate = _decode_to_50((arr > 0).astype(np.uint8), compressed=compressed)
-                fem = _run_fem(candidate)  # (c11, c22, c12, c66, vol)
+                fem = _run_fem_timed(candidate, homog_method, homog_mesh_N,
+                                     homog_ele, args.fem_timeout)
+                if fem is None:
+                    continue  # FEM timed out / errored on this sample; try the next
                 dist = float(_rel_dist(target_raw, np.asarray(fem, dtype=np.float64)))
                 if dist < best_dist:
                     best_dist, best_cell, best_fem = dist, candidate, fem
+
+            if best_fem is None:
+                tqdm.write(f"[skip] cmp {cmp_id} (val {val_h5_idx}): all "
+                           f"{args.diffusion_samples} samples failed FEM")
+                continue
 
             gen_cell = best_cell
             c11_gen, c22_gen, c12_gen, c66_gen, vol_gen = best_fem

@@ -52,10 +52,10 @@ from rayleigh_cloak.loss import (
     transmitted_displacement_ratio,
 )
 from rayleigh_cloak.materials import C_iso, CellMaterial
-from rayleigh_cloak.mesh import extract_submesh, generate_mesh_full
+from rayleigh_cloak.mesh import extract_submesh
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices
 from rayleigh_cloak.problem import build_problem
-from rayleigh_cloak.solver import _create_geometry, solve_reference
+from rayleigh_cloak.solver import _create_geometry, _full_mesh, solve_reference
 
 import logging
 logging.getLogger("jax_fem").setLevel(logging.WARNING)
@@ -87,9 +87,30 @@ CASE_STYLES = {
 }
 
 
-def plot_results(case_csvs: dict[str, Path], out_dir: Path) -> None:
-    """Plot all available cases on one figure."""
+def plot_results(case_csvs: dict[str, Path], out_dir: Path,
+                 train_fstars: list[float] | None = None) -> None:
+    """Plot all available cases on one figure.
+
+    ``train_fstars`` is the set of frequencies the cloak was optimised on. With
+    two or more entries it is drawn as a shaded *optimization band* spanning
+    ``[min, max]`` with a dotted tick at each discrete training frequency; a
+    single entry is drawn as one dotted line. ``None``/empty draws nothing.
+    """
     fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Optimization band — shade the frequency range the cloak was trained over,
+    # drawn first (zorder 0) so the performance curves sit on top of it.
+    if train_fstars:
+        fs_sorted = sorted(float(f) for f in train_fstars)
+        if len(fs_sorted) >= 2:
+            lo, hi = fs_sorted[0], fs_sorted[-1]
+            ax.axvspan(lo, hi, color="0.80", alpha=0.45, zorder=0,
+                       label=rf"Optimization band $f^*\in[{lo:g},\,{hi:g}]$")
+            for fs in fs_sorted:
+                ax.axvline(fs, color="gray", ls=":", lw=0.7, alpha=0.55, zorder=1)
+        else:
+            ax.axvline(fs_sorted[0], color="gray", ls=":", lw=1.0, alpha=0.7,
+                       zorder=1, label=rf"Training $f^*={fs_sorted[0]:g}$")
 
     f_max = 0.0
     y_max = 0.0
@@ -109,7 +130,9 @@ def plot_results(case_csvs: dict[str, Path], out_dir: Path) -> None:
     ax.set_ylabel(r"$\langle |u| \rangle \,/\, \langle |u_{\rm ref}| \rangle$")
     ax.set_title("Cloaking performance vs frequency")
     ax.legend()
-    ax.grid(True, alpha=0.3)
+    # Horizontal gridlines only; the sole vertical lines are the dotted
+    # optimization-frequency ticks drawn above.
+    ax.grid(True, axis="y", alpha=0.3)
     ax.set_xlim(0, f_max + 0.1)
     ax.set_ylim(0, max(y_max * 1.1, 1.15))
 
@@ -336,7 +359,11 @@ def main():
         geometry = _create_geometry(base_config, dp_base)
 
         print("=== Generating mesh (reused across all frequencies and cases) ===")
-        full_mesh = generate_mesh_full(base_config, dp_base, geometry)
+        # Builder-aware: honours mesh.builder (uniform_tri6 -> TRI6 uniform-in-cloak
+        # mesh, matching ele_type). The legacy mesh.generate_mesh_full ignores the
+        # builder and emits TRI3, which mismatches a TRI6 config (Regime B,
+        # docs/mesh_refinement_selection.md §3).
+        full_mesh = _full_mesh(base_config, dp_base, geometry)
         cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
 
         cloak_surface_idx, ref_surface_idx = _surface_indices_at_f(
@@ -370,9 +397,12 @@ def main():
     else:
         print("All requested cases already have cached CSVs. Use -f to re-run.")
 
-    # Plot all enabled cases (from CSVs)
+    # Plot all enabled cases (from CSVs). The optimization band is the
+    # multi-frequency training set when present, else the single base f*.
+    mf = base_config.loss.multi_freq
+    train_fstars = list(mf.f_stars) if mf.f_stars else [base_config.domain.f_star]
     plot_csvs = {k: v for k, v in csv_paths.items() if k in cases_to_run}
-    plot_results(plot_csvs, out_dir)
+    plot_results(plot_csvs, out_dir, train_fstars=train_fstars)
 
 
 if __name__ == "__main__":

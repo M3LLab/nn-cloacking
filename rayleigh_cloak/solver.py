@@ -350,6 +350,7 @@ def solve_optimization_neural(
         symmetrize_init=config.cells.symmetrize_init,
         init=config.cells.init,
         init_path=config.cells.init_path,
+        aniso_cauchy=config.cells.aniso_cauchy,
     )
     print(f"  {cell_decomp.n_cells} total cells, "
           f"{cell_decomp.n_cloak_cells} in cloak")
@@ -368,6 +369,7 @@ def solve_optimization_neural(
         kappa=neural_cfg.kappa,
         cap_anisotropy=neural_cfg.cap_anisotropy,
         anisotropy_ratio=neural_cfg.anisotropy_ratio,
+        aniso_cauchy=config.cells.aniso_cauchy,
     )
     loaded_opt_state = None
     if neural_cfg.init_weights:

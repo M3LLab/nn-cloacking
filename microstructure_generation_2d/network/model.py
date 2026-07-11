@@ -137,7 +137,7 @@ class OccupancyDiffusion(nn.Module):
         times = torch.stack((times[:, :-1], times[:, 1:]), dim=0)
         return times.unbind(dim=-1)
 
-    def training_loss(self, img, tensor_feature, *args, **kwargs):
+    def training_loss(self, img, tensor_feature, sample_weight=None, *args, **kwargs):
         batch = img.shape[0]
         times = torch.zeros((batch,), device=self.device).float().uniform_(0, 1)
         noise = torch.randn_like(img)
@@ -183,9 +183,13 @@ class OccupancyDiffusion(nn.Module):
             else:
                 weight = torch.minimum(snr, snr.new_full((), gamma))
             weight = weight.view(-1, *([1] * (mse.dim() - 1)))
-            return (weight * mse).mean()
+            mse = weight * mse
 
-        return mse.mean()
+        per_sample = mse.flatten(1).mean(dim=1)  # (B,)  per-sample loss
+        if sample_weight is not None:
+            sw = sample_weight.to(per_sample.dtype).reshape(-1)
+            return (per_sample * sw).sum() / sw.sum().clamp_min(1e-8)
+        return per_sample.mean()
 
     def denoise_step(self, img, x_start, time, time_next, tensor_cond, tensor_zero, tensor_w):
         """One DDIM-style update; returns ``(img_next, x_start)``.

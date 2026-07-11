@@ -134,6 +134,13 @@ class CellConfig(BaseModel):
     # grids (esp. 1x1) where a cell's bbox footprint spills far outside the
     # triangular annulus into the bulk half-space.
     confine_to_cloak: bool = False
+    # When True (requires n_C_params=6), the cell stiffness is parametrised as the
+    # 6-param anisotropic **Cauchy** form [C11,C22,C66,C12,C16,C26] (symmetric
+    # shear + normal-shear coupling) instead of the default block-diagonal
+    # Cosserat flat6. This is EXACTLY the symmetrized-triangle material class
+    # (materials.flat6cauchy); use it with init="pushforward"+symmetrize_init to
+    # start at the symmetrized cloak and test whether optimisation improves on it.
+    aniso_cauchy: bool = False
 
     @model_validator(mode="after")
     def _check_pushforward_only_fields(self) -> "CellConfig":
@@ -141,6 +148,11 @@ class CellConfig(BaseModel):
             raise ValueError(
                 f"symmetrize_init=True has no effect when init='{self.init}'; "
                 "it only applies to the 'pushforward' initialisation."
+            )
+        if self.aniso_cauchy and self.n_C_params != 6:
+            raise ValueError(
+                f"aniso_cauchy=True requires n_C_params=6 (the anisotropic-Cauchy "
+                f"flat6cauchy layout); got n_C_params={self.n_C_params}."
             )
         return self
 

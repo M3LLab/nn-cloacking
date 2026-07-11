@@ -82,13 +82,52 @@ def make_split(n: int, val_frac: float, seed: int, out_path: Path) -> dict:
 
 
 def load_or_make_split(n: int, val_frac: float, seed: int, split_path: Path) -> dict:
+    """Load the split at ``split_path`` if it matches, else create it ONLY if absent.
+
+    A materialized split is immutable: if the file exists but its
+    ``(n, seed, val_frac)`` don't match the request, we raise instead of silently
+    regenerating and overwriting it. Overwriting an in-use split (e.g. pointing a
+    val_frac=0.02 eval at a val_frac=0.05 training split) destroys the held-out
+    set and reshuffles rows that a model already trained on. Pass a different
+    ``--split-path`` (or delete the file deliberately) to make a new split.
+    """
     if split_path.exists():
         with open(split_path) as f:
             sp = json.load(f)
         if sp["n"] == n and sp["seed"] == seed and abs(sp["val_frac"] - val_frac) < 1e-9:
             return sp
-        # n/seed/val_frac mismatch: regenerate
+        raise ValueError(
+            f"Split file {split_path} holds (n={sp['n']}, val_frac={sp['val_frac']}, "
+            f"seed={sp['seed']}) but the caller requested (n={n}, val_frac={val_frac}, "
+            f"seed={seed}). Refusing to overwrite a materialized split. Pass a different "
+            f"split_path, fix the requested params (often a wrong val_frac), or delete "
+            f"the file to regenerate it deliberately."
+        )
     return make_split(n, val_frac, seed, split_path)
+
+
+def inverse_density_weights(
+    values: np.ndarray, bins: int = 50, value_range: Optional[tuple] = None,
+    clip: float = 0.0,
+) -> np.ndarray:
+    """Per-sample weights ∝ 1/histogram-density(values), normalized to mean 1.
+
+    Flattens the (training) distribution along ``values`` (e.g. volume fraction):
+    samples in sparse bins are up-weighted, samples in over-represented bins
+    down-weighted, so each bin contributes equal total weight. ``clip`` (>0) caps
+    the maximum per-sample weight at ``clip``× the mean to bound gradient variance
+    from very sparse bins; the mean is renormalized to 1 afterwards.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    edges = np.histogram_bin_edges(values, bins=bins, range=value_range)
+    counts, _ = np.histogram(values, bins=edges)
+    b = np.clip(np.digitize(values, edges) - 1, 0, len(counts) - 1)
+    w = 1.0 / np.maximum(counts[b].astype(np.float64), 1.0)
+    w *= values.size / w.sum()  # mean -> 1
+    if clip and clip > 0:
+        w = np.minimum(w, clip)
+        w *= values.size / w.sum()  # renormalize mean -> 1
+    return w.astype(np.float32)
 
 
 class CABulkDiffusionDataset(Dataset):
@@ -108,6 +147,7 @@ class CABulkDiffusionDataset(Dataset):
         seed: Optional[int] = None,
         compressed: bool = False,
         padded_size: int = QUADRANT_SIZE,
+        sample_weights: Optional[np.ndarray] = None,
     ):
         super().__init__()
         self.h5_path = str(h5_path)
@@ -116,6 +156,8 @@ class CABulkDiffusionDataset(Dataset):
         self.cfg_dropout = cfg_dropout
         self.compressed = compressed
         self.padded_size = padded_size
+        # Full-length (n_h5,) per-row loss weights, indexed by h5 row; None -> 1.0.
+        self.sample_weights = sample_weights
         self._h5: Optional[h5py.File] = None
         self._cells = None  # type: ignore
         self._C11 = None
@@ -179,8 +221,11 @@ class CABulkDiffusionDataset(Dataset):
             elif r < 0.3:
                 tensor_feature[4] = CFG_SENTINEL    # drop vol, keep stiffness
 
+        w = 1.0 if self.sample_weights is None else float(self.sample_weights[h_idx])
+
         return {
             "occupancy": torch.from_numpy(occ),
             "tensor_feature": torch.from_numpy(tensor_feature),
             "h5_index": h_idx,
+            "weight": torch.tensor(w, dtype=torch.float32),
         }

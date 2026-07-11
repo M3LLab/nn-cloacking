@@ -1,0 +1,47 @@
+# v2: branched from v1 (same ca_squared_2m data, split, and network). Adds loss
+# reweighting to flatten the training distribution over volume fraction (vf).
+# Per-sample weight ∝ 1/density(vf) (50 bins), capped at 10× the mean to bound
+# gradient variance from sparse vf bins. vf == rho/2300 == vol, so this also
+# rebalances the density axis. val_loss stays unweighted for honest comparison
+# against v1. Other axes (K/K_HS, anisotropy) to be flattened later.
+
+# data
+h5_path: output/ca_squared_2m/stiffness.h5
+scaler_dir: dataset/scalers
+split_path: dataset/splits/split_v1.json
+val_frac: 0.05
+split_seed: 777
+
+# loss reweighting
+reweight: vf
+reweight_bins: 50
+reweight_clip: 10.0
+
+# IO
+results_folder: output/diffusion_ca_squared
+name: v2
+seed: 777
+save_every_epoch: 5
+save_last: true
+continue_training: false
+
+# model
+image_size: 64
+base_channels: 128
+attention_resolutions: "8,4"
+with_attention: true
+num_heads: 4
+dropout: 0.1
+use_tensor_condition: true
+noise_schedule: cosine
+
+# training
+batch_size: 256
+lr: 1.0e-4
+lr_schedule: cosine
+optimizer_name: adam
+ema_rate: 0.9999
+training_epoch: 200
+gradient_clip_val: 1.0
+num_workers: 7
+precision: "32-true"
