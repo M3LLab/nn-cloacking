@@ -1,0 +1,125 @@
+\begin{thebibliography}{22}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\href}[2]{#2}
+\providecommand{\path}[1]{#1}
+\providecommand{\DOIprefix}{doi:}
+\providecommand{\ArXivprefix}{arXiv:}
+\providecommand{\URLprefix}{URL: }
+\providecommand{\Pubmedprefix}{pmid:}
+\providecommand{\doi}[1]{\href{http://dx.doi.org/#1}{\path{#1}}}
+\providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
+\providecommand{\bibinfo}[2]{#2}
+\ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
+%Type = Article
+\bibitem[{Brun et~al.(2009)Brun, Guenneau, and Movchan}]{brun2009}
+\bibinfo{author}{M.~Brun}, \bibinfo{author}{S.~Guenneau}, \bibinfo{author}{A.~B. Movchan},
+\newblock \bibinfo{title}{Achieving control of in-plane elastic waves},
+\newblock \bibinfo{journal}{Appl. Phys. Lett.} \bibinfo{volume}{94} (\bibinfo{year}{2009}) \bibinfo{pages}{061903}. \DOIprefix\doi{10.1063/1.3068491}.
+%Type = Article
+\bibitem[{Norris and Shuvalov(2011)}]{norris2011}
+\bibinfo{author}{A.~N. Norris}, \bibinfo{author}{A.~L. Shuvalov},
+\newblock \bibinfo{title}{Elastic cloaking theory},
+\newblock \bibinfo{journal}{Wave Motion} \bibinfo{volume}{48} (\bibinfo{year}{2011}) \bibinfo{pages}{525--538}. \DOIprefix\doi{10.1016/j.wavemoti.2011.03.002}.
+%Type = Article
+\bibitem[{Pendry et~al.(2006)Pendry, Schurig, and Smith}]{pendry2006}
+\bibinfo{author}{J.~B. Pendry}, \bibinfo{author}{D.~Schurig}, \bibinfo{author}{D.~R. Smith},
+\newblock \bibinfo{title}{Controlling electromagnetic fields},
+\newblock \bibinfo{journal}{Science} \bibinfo{volume}{312} (\bibinfo{year}{2006}) \bibinfo{pages}{1780--1782}. \DOIprefix\doi{10.1126/science.1125907}.
+%Type = Article
+\bibitem[{Li and Pendry(2008)}]{li2008}
+\bibinfo{author}{J.~Li}, \bibinfo{author}{J.~B. Pendry},
+\newblock \bibinfo{title}{Hiding under the carpet: a new strategy for cloaking},
+\newblock \bibinfo{journal}{Phys. Rev. Lett.} \bibinfo{volume}{101} (\bibinfo{year}{2008}) \bibinfo{pages}{203901}. \DOIprefix\doi{10.1103/PhysRevLett.101.203901}.
+%Type = Article
+\bibitem[{Stenger et~al.(2012)Stenger, Wilhelm, and Wegener}]{stenger2012}
+\bibinfo{author}{N.~Stenger}, \bibinfo{author}{M.~Wilhelm}, \bibinfo{author}{M.~Wegener},
+\newblock \bibinfo{title}{Experiments on elastic cloaking in thin plates},
+\newblock \bibinfo{journal}{Phys. Rev. Lett.} \bibinfo{volume}{108} (\bibinfo{year}{2012}) \bibinfo{pages}{014301}. \DOIprefix\doi{10.1103/PhysRevLett.108.014301}.
+%Type = Article
+\bibitem[{B{\"u}ckmann et~al.(2015)B{\"u}ckmann, Kadic, Schittny, and Wegener}]{buckmann2015}
+\bibinfo{author}{T.~B{\"u}ckmann}, \bibinfo{author}{M.~Kadic}, \bibinfo{author}{R.~Schittny}, \bibinfo{author}{M.~Wegener},
+\newblock \bibinfo{title}{Mechanical cloak design by direct lattice transformation},
+\newblock \bibinfo{journal}{Proc. Natl. Acad. Sci. U.S.A.} \bibinfo{volume}{112} (\bibinfo{year}{2015}) \bibinfo{pages}{4930--4934}. \DOIprefix\doi{10.1073/pnas.1501240112}.
+%Type = Article
+\bibitem[{Milton and Cherkaev(1995)}]{milton1995}
+\bibinfo{author}{G.~W. Milton}, \bibinfo{author}{A.~V. Cherkaev},
+\newblock \bibinfo{title}{Which elasticity tensors are realizable?},
+\newblock \bibinfo{journal}{J. Eng. Mater. Technol.} \bibinfo{volume}{117} (\bibinfo{year}{1995}) \bibinfo{pages}{483--493}. \DOIprefix\doi{10.1115/1.2804743}.
+%Type = Article
+\bibitem[{Milton et~al.(2006)Milton, Briane, and Willis}]{milton2006}
+\bibinfo{author}{G.~W. Milton}, \bibinfo{author}{M.~Briane}, \bibinfo{author}{J.~R. Willis},
+\newblock \bibinfo{title}{On cloaking for elasticity and physical equations with a transformation invariant form},
+\newblock \bibinfo{journal}{New J. Phys.} \bibinfo{volume}{8} (\bibinfo{year}{2006}) \bibinfo{pages}{248}. \DOIprefix\doi{10.1088/1367-2630/8/10/248}.
+%Type = Article
+\bibitem[{Norris(2008)}]{norris2008}
+\bibinfo{author}{A.~N. Norris},
+\newblock \bibinfo{title}{Acoustic cloaking theory},
+\newblock \bibinfo{journal}{Proc. R. Soc. A} \bibinfo{volume}{464} (\bibinfo{year}{2008}) \bibinfo{pages}{2411--2434}. \DOIprefix\doi{10.1098/rspa.2008.0076}.
+%Type = Article
+\bibitem[{Nassar et~al.(2018)Nassar, Chen, and Huang}]{nassar2018}
+\bibinfo{author}{H.~Nassar}, \bibinfo{author}{Y.~Y. Chen}, \bibinfo{author}{G.~L. Huang},
+\newblock \bibinfo{title}{A degenerate polar lattice for cloaking in full two-dimensional elastodynamics and statics},
+\newblock \bibinfo{journal}{Proc. R. Soc. A} \bibinfo{volume}{474} (\bibinfo{year}{2018}) \bibinfo{pages}{20180523}. \DOIprefix\doi{10.1098/rspa.2018.0523}.
+%Type = Article
+\bibitem[{Wang et~al.(2022)Wang, Boddapati, Liu, Zhu, Daraio, and Chen}]{wang2022}
+\bibinfo{author}{L.~Wang}, \bibinfo{author}{J.~Boddapati}, \bibinfo{author}{K.~Liu}, \bibinfo{author}{P.~Zhu}, \bibinfo{author}{C.~Daraio}, \bibinfo{author}{W.~Chen},
+\newblock \bibinfo{title}{Mechanical cloak via data-driven aperiodic metamaterial design},
+\newblock \bibinfo{journal}{Proc. Natl. Acad. Sci. U.S.A.} \bibinfo{volume}{119} (\bibinfo{year}{2022}) \bibinfo{pages}{e2122185119}. \DOIprefix\doi{10.1073/pnas.2122185119}.
+%Type = Article
+\bibitem[{Chatzopoulos et~al.(2023)Chatzopoulos, Palermo, Diatta, Guenneau, and Marzani}]{chatzopoulos2023}
+\bibinfo{author}{Z.~Chatzopoulos}, \bibinfo{author}{A.~Palermo}, \bibinfo{author}{A.~Diatta}, \bibinfo{author}{S.~Guenneau}, \bibinfo{author}{A.~Marzani},
+\newblock \bibinfo{title}{Cloaking {Rayleigh} waves via symmetrized elastic tensors},
+\newblock \bibinfo{journal}{Int. J. Eng. Sci.} \bibinfo{volume}{191} (\bibinfo{year}{2023}) \bibinfo{pages}{103899}. \DOIprefix\doi{10.1016/j.ijengsci.2023.103899}.
+%Type = Article
+\bibitem[{Xue et~al.(2023)Xue, Liao, Gan, Park, Xie, Liu, and Cao}]{xu2020jaxfem}
+\bibinfo{author}{T.~Xue}, \bibinfo{author}{S.~Liao}, \bibinfo{author}{Z.~Gan}, \bibinfo{author}{C.~Park}, \bibinfo{author}{X.~Xie}, \bibinfo{author}{W.~K. Liu}, \bibinfo{author}{J.~Cao},
+\newblock \bibinfo{title}{{JAX-FEM}: A differentiable {GPU}-accelerated 3{D} finite element solver for automatic inverse design and mechanistic data science},
+\newblock \bibinfo{journal}{Comput. Phys. Commun.} \bibinfo{volume}{291} (\bibinfo{year}{2023}) \bibinfo{pages}{108802}. \DOIprefix\doi{10.1016/j.cpc.2023.108802}.
+%Type = Article
+\bibitem[{Mildenhall et~al.(2021)Mildenhall, Srinivasan, Tancik, Barron, Ramamoorthi, and Ng}]{mildenhall2020nerf}
+\bibinfo{author}{B.~Mildenhall}, \bibinfo{author}{P.~P. Srinivasan}, \bibinfo{author}{M.~Tancik}, \bibinfo{author}{J.~T. Barron}, \bibinfo{author}{R.~Ramamoorthi}, \bibinfo{author}{R.~Ng},
+\newblock \bibinfo{title}{{NeRF}: Representing scenes as neural radiance fields for view synthesis},
+\newblock \bibinfo{journal}{Communications of the ACM} \bibinfo{volume}{65} (\bibinfo{year}{2021}) \bibinfo{pages}{99--106}. \DOIprefix\doi{10.1145/3503250}.
+%Type = Inproceedings
+\bibitem[{Sitzmann et~al.(2020)Sitzmann, Martel, Bergman, Lindell, and Wetzstein}]{sitzmann2020siren}
+\bibinfo{author}{V.~Sitzmann}, \bibinfo{author}{J.~N.~P. Martel}, \bibinfo{author}{A.~W. Bergman}, \bibinfo{author}{D.~B. Lindell}, \bibinfo{author}{G.~Wetzstein},
+\newblock \bibinfo{title}{Implicit neural representations with periodic activation functions},
+\newblock in: \bibinfo{booktitle}{Advances in Neural Information Processing Systems (NeurIPS)}, \bibinfo{year}{2020}.
+%Type = Article
+\bibitem[{Tancik et~al.(2020)Tancik, Srinivasan, Mildenhall, Fridovich-Keil, Raghavan, Singhal, Ramamoorthi, Barron, and Ng}]{tancik2020fourier}
+\bibinfo{author}{M.~Tancik}, \bibinfo{author}{P.~P. Srinivasan}, \bibinfo{author}{B.~Mildenhall}, \bibinfo{author}{S.~Fridovich-Keil}, \bibinfo{author}{N.~Raghavan}, \bibinfo{author}{U.~Singhal}, \bibinfo{author}{R.~Ramamoorthi}, \bibinfo{author}{J.~T. Barron}, \bibinfo{author}{R.~Ng},
+\newblock \bibinfo{title}{Fourier features let networks learn high frequency functions in low dimensional domains},
+\newblock \bibinfo{journal}{Advances in Neural Information Processing Systems} \bibinfo{volume}{33} (\bibinfo{year}{2020}) \bibinfo{pages}{7537--7547}.
+%Type = Article
+\bibitem[{Hoyer et~al.(2019)Hoyer, Sohl-Dickstein, and Greydanus}]{hoyer2019}
+\bibinfo{author}{S.~Hoyer}, \bibinfo{author}{J.~Sohl-Dickstein}, \bibinfo{author}{S.~Greydanus},
+\newblock \bibinfo{title}{Neural reparameterization improves structural optimization},
+\newblock \bibinfo{journal}{arXiv preprint arXiv:1909.04240}  (\bibinfo{year}{2019}).
+%Type = Article
+\bibitem[{Chandrasekhar and Suresh(2021)}]{chandrasekhar2021}
+\bibinfo{author}{A.~Chandrasekhar}, \bibinfo{author}{K.~Suresh},
+\newblock \bibinfo{title}{{TOuNN}: Topology optimization using neural networks},
+\newblock \bibinfo{journal}{Struct. Multidiscip. Optim.} \bibinfo{volume}{63} (\bibinfo{year}{2021}) \bibinfo{pages}{1135--1149}. \DOIprefix\doi{10.1007/s00158-020-02748-4}.
+%Type = Inproceedings
+\bibitem[{Zehnder et~al.(2021)Zehnder, Li, Coros, and Thomaszewski}]{zehnder2021}
+\bibinfo{author}{J.~Zehnder}, \bibinfo{author}{Y.~Li}, \bibinfo{author}{S.~Coros}, \bibinfo{author}{B.~Thomaszewski},
+\newblock \bibinfo{title}{{NTopo}: Mesh-free topology optimization using implicit neural representations},
+\newblock in: \bibinfo{booktitle}{Advances in Neural Information Processing Systems (NeurIPS)}, volume~\bibinfo{volume}{34}, \bibinfo{year}{2021}.
+%Type = Article
+\bibitem[{Yang et~al.(2024)Yang, Wang, Zhai, Chen, Liu, Fang, Xu, Belyaev, Wang, and Liu}]{yang2024}
+\bibinfo{author}{Y.~Yang}, \bibinfo{author}{L.~Wang}, \bibinfo{author}{X.~Zhai}, \bibinfo{author}{K.~Chen}, \bibinfo{author}{W.~Liu}, \bibinfo{author}{M.~Fang}, \bibinfo{author}{T.~Xu}, \bibinfo{author}{A.~Belyaev}, \bibinfo{author}{C.~C.~L. Wang}, \bibinfo{author}{L.~Liu},
+\newblock \bibinfo{title}{Guided diffusion for fast inverse design of density-based mechanical metamaterials},
+\newblock \bibinfo{journal}{arXiv preprint arXiv:2401.13570}  (\bibinfo{year}{2024}).
+%Type = Article
+\bibitem[{Willis(1981)}]{willis1981}
+\bibinfo{author}{J.~R. Willis},
+\newblock \bibinfo{title}{Variational principles for dynamic problems for inhomogeneous elastic media},
+\newblock \bibinfo{journal}{Wave Motion} \bibinfo{volume}{3} (\bibinfo{year}{1981}) \bibinfo{pages}{1--11}. \DOIprefix\doi{10.1016/0165-2125(81)90008-1}.
+%Type = Article
+\bibitem[{Andkj{\ae}r and Sigmund(2013)}]{andkjaer2013}
+\bibinfo{author}{J.~Andkj{\ae}r}, \bibinfo{author}{O.~Sigmund},
+\newblock \bibinfo{title}{Topology optimized cloak for airborne sound},
+\newblock \bibinfo{journal}{J. Vib. Acoust.} \bibinfo{volume}{135} (\bibinfo{year}{2013}) \bibinfo{pages}{041011}. \DOIprefix\doi{10.1115/1.4023828}.
+
+\end{thebibliography}
