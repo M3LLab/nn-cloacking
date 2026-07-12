@@ -94,6 +94,22 @@
 
 ---
 
+## Single frequency - NEW
+
+### §4.1 — Single material beats symmetrisation (A_symmetrized, A_1x1flat4_vs_symmetrized)
+A single searched orthotropic material (1×1) reaches η=0.85, far better than Chatzopoulos's closed-form symmetrisation (η=0.63) — "much better cloaking, but not perfect" (vs ideal η=0.999). Table 1 + frequency-sweep figure.
+
+### §4.2 — Four materials reach 95% cloaking (A_partition_pushed)
+A 2×2 decomposition = 4 materials → η=0.962 (within 4% of perfect). Presented as the requested table (1×1…3×2), plus the 1-vs-4 field comparison.
+
+### §4.3 — Grid selection by cell sweep (A_cell_sweep)
+Sweep of 5×4…32×24 shows η plateaus at ~0.99 by 14×10; finer grids give no gain — "converging, stable, fast." I explicitly highlight that the 14×10 grid = 140 cells but only 46 lie in the cloak region and carry design variables (bolded in text, a dedicated "cloak cells" table column, and in the histogram's in-cloak counts).
+
+### §4.4 — Near-perfect cloaking at 14×10 (A_single_freq_14x10)
+The 46-material design reaches η=0.990, shown reconstructing the reference and matching the ideal continuous polar cloak in the 4-panel field comparison, plus the optimised per-cell material tensor.
+
+
+
 ## 4. Broadband multifrequency optimisation  `sec:multifreq`
 
 ### 4.1 Single-frequency overfitting

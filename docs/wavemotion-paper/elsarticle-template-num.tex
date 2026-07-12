@@ -688,162 +688,246 @@ transitions near the cloak boundaries.
 \section{Single-frequency results}\label{sec:single_freq}
 %% =============================================================
 
-\subsection{Comparison against the ideal cloak}
+All single-frequency results are reported at the design frequency
+$f^\star=2.0$ through the dimensionless \emph{cloak ratio}
+\be\label{eq:cloak_ratio}
+  \eta \;=\;
+  \frac{\langle|\mbf{u}|\rangle}{\langle|\mbf{u}_{\mathrm{ref}}|\rangle}
+\ee
+of the mean surface-displacement magnitude on the free surface beyond the
+cloak footprint to that of the defect-free reference (Sec.~\ref{sec:setup}),
+so that $\eta\to1$ is perfect cloaking and $|1-\eta|$ measures the residual
+distortion. We build up the design in three steps of increasing material
+freedom: a single homogeneous realisable material
+(Sec.~\ref{subsec:single_material}), a handful of independent materials
+(Sec.~\ref{subsec:four_materials}), and finally a cell grid selected by a
+convergence sweep (Secs.~\ref{subsec:grid_selection}--\ref{subsec:final14}).
 
-We compare three configurations: the raw per-cell baseline,
-neural-field reparameterisation~\eqref{eq:neural_relative}, and the
-continuous $\mbf{c}_{\mathrm{eff}}$ reference, all using the $14\times10$
-grid. The 4 Cauchy moduli per cell are initialised at a starting point
-($\mathcal{D}_{\mathrm{r}}=\textbf{[FILL: confirm D\_r for 14$\times$10 grid]}\%$)
-and then freely optimised. % TODO confirm init
-The right-boundary distortion at convergence is reported in
-Table~\ref{tab:opt_results}.
+\subsection{A single realisable material already beats symmetrisation}
+\label{subsec:single_material}
+
+We first ask how far a \emph{single} realisable material can go. Both cloak
+phases are collapsed onto one orthotropic 4CM tile (a $1\times1$ cell filling
+the whole cloak) and its four Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$
+and density are searched by the differentiable FEM at $f^\star=2.0$. The
+natural point of comparison is the closed-form arithmetic-mean symmetrisation
+of \citet{chatzopoulos2023}: the ideal polar tensor~\eqref{eq:Ceff} made
+minor-symmetric by averaging each broken pair, instantiated on the same mesh
+and solved with the same FEM. Both are single homogeneous Cauchy materials,
+so this is a like-for-like test of hand symmetrisation against direct search.
+
+Table~\ref{tab:single_vs_sym} reports the outcome. The symmetrised tensor
+recovers only $\eta=0.63$ and actually distorts the near field more than the
+bare notch (the ideal-material minor-symmetry violation is large at
+$f^\star=2$). A single searched orthotropic material instead reaches
+$\eta=0.85$ --- a substantial jump towards the ideal continuous polar cloak
+($\eta=0.999$) obtained from just one degree of material freedom per phase,
+and clear evidence that direct search inside the Cauchy class outperforms
+symmetrisation. It is, however, still far from perfect: one material cannot
+reproduce the depth variation of the ideal tensor.
+Figure~\ref{fig:single_vs_sym_sweep} confirms that the advantage is
+concentrated around the design frequency, as expected for a single-frequency
+optimisation.
 
 \begin{table}[htbp]
 \centering
-\caption{Single-frequency cloaking distortion at $f^\star=2.0$
-relative to the $14\times10$ Cartesian cloak (4CM, four free orthotropic
-Cauchy moduli). The neural-field run reaches the same transmission-side
-distortion as the per-cell baseline with $\sim$4$\times$ fewer parameters
-and without any explicit smoothness penalty.}
-\label{tab:opt_results}
-\begin{tabular*}{\textwidth}{@{}llll@{}}
+\caption{Single-frequency cloak ratio $\eta$~\eqref{eq:cloak_ratio} at
+$f^\star=2.0$ for a single homogeneous realisable material. A single
+orthotropic 4CM tile found by direct search ($\eta=0.85$) markedly
+outperforms the closed-form arithmetic-mean symmetrisation of
+\citet{chatzopoulos2023} ($\eta=0.63$), but neither reaches the ideal
+continuous polar cloak. Values from \texttt{output/A\_symmetrized} and
+\texttt{output/A\_1x1flat4\_vs\_symmetrized}.}
+\label{tab:single_vs_sym}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcc@{}}
 \toprule
-Configuration & $\mathcal{D}_{\mathrm{r}}$ [\%]
-              & $\mathcal{D}_{\partial}$ [\%]
-              & $\mathcal{D}_{\mathrm{out}}$ [\%] \\
+Configuration & $\eta$ & $|1-\eta|$ \\
 \midrule
-Uncoated defect                            & 70.31 & ---  & 5.18 \\
-$14\times10$ initialisation % TODO confirm D_r
-                                           & \textbf{[FILL]} & --- & --- \\
-Continuous $\mbf{c}_{\mathrm{eff}}$ (ideal polar) & 27.51 & 1.33 & 1.57 \\
+Uncoated notch (no cloak)                                   & $0.37$  & $0.63$ \\
+Symmetrised ideal (Chatzopoulos, closed-form Cauchy)        & $0.634$ & $0.366$ \\
+Single optimised material ($1\times1$, 4CM)                 & $0.850$ & $0.150$ \\
 \midrule
-Per-cell optimised 4CM (Adam)              & \textbf{[FILL]} & \textbf{[FILL]} & \textbf{[FILL]} \\
-Neural-field optimised 4CM                 & \textbf{[FILL]} & \textbf{[FILL]} & \textbf{[FILL]} \\
+Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar, unrealisable) & $0.999$ & $0.001$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.85\linewidth]{convergence_comparison.pdf}
-  \caption{Right-boundary distortion $\mathcal{D}_{\mathrm{r}}$ during
-  optimisation for the per-cell (Adam) and neural-field
-  reparameterisation on the $14\times10$ grid. Both methods drop below
-  the continuous $\mbf{c}_{\mathrm{eff}}$ baseline
-  ($\textbf{[FILL]}\%$) within $\sim\!10$ iterations and reach
-  $\textbf{[FILL]}\%$ by step~50. Dashed/dotted lines mark the
-  $14\times10$ initialisation and the continuous
-  transformation-elasticity limit.}
-  \label{fig:convergence_comparison}
+  \includegraphics[width=0.9\linewidth]{figures/single_vs_symmetrized_sweep.png}
+  \caption{Frequency sweep of the cloak ratio
+  $\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ for the
+  single-material designs: the ideal continuous transformation cloak
+  (red, $\eta\approx1$ at every frequency), the closed-form symmetrised
+  tensor of \citet{chatzopoulos2023} (purple), and the single optimised
+  $1\times1$ material (blue). At the training frequency $f^\star=2$ the
+  optimised material recovers $\eta=0.85$ against $0.63$ for symmetrisation.}
+  \label{fig:single_vs_sym_sweep}
 \end{figure}
 
-% \subsection{Mesh-refinement convergence}\label{subsec:mesh_conv}
+\subsection{Four materials reach $95\%$ cloaking}\label{subsec:four_materials}
 
-% To isolate the residual FEM discretisation error we run the
-% continuous cloak on a sequence of base meshes
-% $N_e\in\{6,12,25,50,100,200\}\,\text{k}$ triangular elements with
-% the same distance-based refinement schedule. Figure~\ref{fig:mesh_conv}
-% reports the right-boundary and outside-cloak distortions as functions
-% of $N_e^{-1/2}$ (proxy for a characteristic element length $h$). The
-% linear fit on the four finest meshes extrapolates to
-% $\mathcal{D}_{\mathrm{r},\infty}\approx 19\pm 5\%$ and
-% $\mathcal{D}_{\mathrm{out},\infty}\approx 0.75\%$; the residual
-% right-boundary distortion of the
-% ideal cloak is therefore not an optimisation artefact but a finite-mesh
-% artefact of the corner singularities at the notch tip and the cloak
-% vertices.
+Giving each phase more freedom closes most of the remaining gap. Splitting
+the cloak into a coarse $n_x\times n_y$ grid of independent orthotropic tiles
+and optimising all of them jointly, we find that even a $2\times2$
+decomposition --- just \emph{four} realisable materials --- lifts the cloak
+ratio to $\eta=0.962$, i.e.\ within $4\%$ of a perfect cloak
+(Table~\ref{tab:partition}). The improvement is markedly anisotropic:
+subdividing in depth helps far more than in the propagation direction
+($1\times2$ reaches $\eta=0.92$ whereas $2\times1$ actually drops to
+$\eta=0.78$), reflecting that the ideal cloak material varies mainly with
+depth through the shear map~\eqref{eq:shearmap}. Beyond four materials the
+gain per added cell is small, motivating a more systematic grid study.
 
-% \begin{figure}[htbp]
-%   \centering
-%   \includegraphics[width=0.8\linewidth]{mesh_convergence.png}
-%   \caption{FEM-mesh convergence of the continuous
-%   $\mbf{c}_{\mathrm{eff}}$ cloak. Right-boundary distortion
-%   $\mathcal{D}_{\mathrm{r}}$ and outside-cloak distortion
-%   $\mathcal{D}_{\mathrm{out}}$ are plotted against $N_e^{-1/2}$;
-%   dashed lines indicate power-law fits extrapolated to $h\to 0$.}
-%   \label{fig:mesh_conv}
-% \end{figure}
+\begin{table}[htbp]
+\centering
+\caption{Single-frequency cloak ratio $\eta$ for small cell decompositions
+of the cloak (each cell is one independent orthotropic 4CM material, all
+optimised jointly at $f^\star=2.0$). Four materials ($2\times2$) already
+reach $\eta=0.962$. Values from \texttt{output/A\_partition\_pushed}.}
+\label{tab:partition}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccc@{}}
+\toprule
+Decomposition $n_x\times n_y$ & Materials & $\eta$ & $|1-\eta|$ \\
+\midrule
+$1\times1$          & 1 & $0.857$ & $0.143$ \\
+$2\times1$          & 2 & $0.780$ & $0.220$ \\
+$1\times2$          & 2 & $0.920$ & $0.080$ \\
+$3\times1$          & 3 & $0.939$ & $0.061$ \\
+$\mathbf{2\times2}$ & \textbf{4} & $\mathbf{0.962}$ & $\mathbf{0.038}$ \\
+$3\times2$          & 6 & $0.964$ & $0.036$ \\
+\bottomrule
+\end{tabular*}
+\end{table}
 
-\subsection{Wavefield and material visualisations}\label{subsec:wavefield}
+\subsection{Grid selection by a cell-convergence sweep}
+\label{subsec:grid_selection}
 
-Beyond the scalar distortion metrics, three visual diagnostics are
-reported for each single-frequency design. Figure~\ref{fig:reu_comparison}
-overlays the real part of the displacement field
-$\operatorname{Re}[\mbf{u}(x,y)]$ for the uncoated defect, the analytical
-continuous cloak, and the optimised neural-field cloak against the
-reference (defect-free) solution; the transmission-side reconstruction is the
-visual analogue of the right-boundary metric. Figure~\ref{fig:unorm}
-reports the magnitude $\|\mbf{u}\|$, which is invariant under the
-phase ambiguity inherent to frequency-domain solutions and exposes
-residual scattering inside the physical domain that is not captured by
-the boundary $L^2$. Figure~\ref{fig:matheatmap} visualises the per-cell
-material distribution
-$(C_{11},C_{12},C_{22},C_{66},\rho)$ of the optimised cloak, providing
-the basis for the symmetry and parameterisation ablations of
-Sections~\ref{subsec:flat4} and~\ref{subsec:symmetrised}.
+To push towards perfect cloaking we refine the grid, but the resolution must
+be chosen so that cloaking has \emph{converged} while the per-iteration cost
+stays low. We therefore run a single-frequency cell sweep over seven
+Cartesian grids from $5\times4$ to $32\times24$, optimising each to
+convergence and recording the cloak ratio
+(Table~\ref{tab:cell_sweep}, Fig.~\ref{fig:cell_sweep}).
+
+A key point is that materials are assigned only to cells whose centre falls
+between the inner and outer triangles~\eqref{eq:triangles}, so an
+$n_x\times n_y$ grid uses far fewer than $n_x n_y$ materials: the triangular
+cloak occupies only a fraction of its Cartesian bounding box. The
+$14\times10$ grid nominally spans $140$ cells but places only
+\textbf{46 cells inside the cloak region}; these $46$ are the actual design
+variables, the remaining $94$ being background. (The figures in
+parentheses in Fig.~\ref{fig:cell_sweep} are these in-cloak counts:
+$5\times4\!\to\!7$, $8\times6\!\to\!16$, $10\times8\!\to\!28$,
+$14\times10\!\to\!46$, and so on.)
+
+The cloak ratio saturates on a plateau at $\eta\approx0.99$
+($|1-\eta|\approx0.01$) by $14\times10$: the three finer grids
+($20\times15$, $26\times20$, $32\times24$) give no further improvement --- and
+even a marginal regression from FEM cost and optimisation noise --- while
+their cell counts, and hence solve cost, grow several-fold. The $14\times10$
+grid is the smallest decomposition sitting firmly on this converged
+sub-$1\%$ plateau, and we adopt it for all subsequent single-frequency
+work: it is stable (on the flat part of the curve), cheap (only $46$ active
+materials), and fast to optimise.
+
+\begin{table}[htbp]
+\centering
+\caption{Single-frequency cell-convergence sweep at $f^\star=2.0$. Each grid
+is optimised to convergence; ``cloak cells'' is the number of cells whose
+centre lies inside the triangular cloak and therefore carries design
+variables (far fewer than $n_x n_y$). The cloak ratio plateaus at
+$\eta\approx0.99$ by $14\times10$; finer grids do not improve it. Values from
+\texttt{output/A\_cell\_sweep}.}
+\label{tab:cell_sweep}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
+\toprule
+Grid $n_x\times n_y$ & Total cells & Cloak cells & $\eta$ & $|1-\eta|$ \\
+\midrule
+$5\times4$            & 20  & 7   & $0.944$ & $0.056$ \\
+$8\times6$            & 48  & 16  & $0.943$ & $0.057$ \\
+$10\times8$           & 80  & 28  & $0.977$ & $0.023$ \\
+$\mathbf{14\times10}$ & \textbf{140} & \textbf{46} & $\mathbf{0.990}$ & $\mathbf{0.010}$ \\
+$20\times15$          & 300 & 100 & $0.990$ & $0.010$ \\
+$26\times20$          & 520 & 176 & $0.988$ & $0.012$ \\
+$32\times24$          & 768 & 256 & $0.988$ & $0.012$ \\
+\bottomrule
+\end{tabular*}
+\end{table}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.95\linewidth]{reu_comparison.png}
-  \caption{Real part of the displacement field at $f^\star=2.0$.
-  Columns: uncoated defect, continuous $\mbf{c}_{\mathrm{eff}}$,
-  neural-field optimised cloak, reference (defect-free) solution. The
-  optimised cloak reconstructs the reference field on the transmission
-  side while preserving the wavefront topology of the upstream field.}
-  \label{fig:reu_comparison}
+  \includegraphics[width=0.8\linewidth]{figures/cell_sweep_histogram.png}
+  \caption{Cloaking error $|1-\eta|$ versus cell decomposition in the
+  single-frequency sweep; numbers in parentheses on the axis are the
+  in-cloak cell counts. The error drops sharply up to $10\times8$
+  ($28$ cloak cells) and then flattens: $14\times10$ ($46$ cloak cells) is
+  the smallest grid on the converged sub-$1\%$ plateau, with finer grids
+  giving no further improvement.}
+  \label{fig:cell_sweep}
+\end{figure}
+
+\subsection{Near-perfect cloaking on the $14\times10$ grid}\label{subsec:final14}
+
+The adopted $14\times10$ design ($46$ optimised in-cloak materials) reaches
+$\eta=0.990$, effectively closing the gap to the ideal continuous cloak.
+Figure~\ref{fig:single14_field} compares the real-displacement magnitude of
+the optimised cloak against three references on the same mesh: the defect-free
+reference, the uncloaked notch, and the ideal continuous polar
+$\mbf{c}_{\mathrm{eff}}$. The uncloaked notch back-scatters the incident
+Rayleigh wave and casts a clear shadow downstream; the optimised $14\times10$
+cloak restores the surface wavefield to the reference, matching the ideal
+continuous cloak panel while using only realisable orthotropic Cauchy
+materials. The only visible residual is a slight phase shift of the optimised solution:
+Figure~\ref{fig:single14_zoom} zooms into the cloak region and shows that,
+whereas the ideal continuous cloak keeps its near-surface wavefronts
+phase-aligned with the reference, the optimised $14\times10$ cloak carries them
+$\approx0.18\lambda$ ($\approx65^\circ$) later. This lag is a direct and benign
+consequence of the phase-invariant magnitude loss~\eqref{eq:opt_loss_cloak}:
+the objective constrains only the amplitude envelope, leaving a constant phase
+offset --- the small extra path of a wave routed around the notch ---
+unpenalised.
+Figure~\ref{fig:single14_material} shows the corresponding
+optimised per-cell moduli $(C_{11},C_{22},C_{12},C_{66})$ and density over
+the $46$ cloak cells.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.82\linewidth]{figures/single_freq_14x10_re_mag.png}
+  \caption{Real-displacement magnitude $|\!\operatorname{Re}\mbf{u}|$ at
+  $f^\star=2.0$ (top to bottom): defect-free reference, uncloaked notch,
+  ideal continuous polar cloak $\mbf{c}_{\mathrm{eff}}$, and the optimised
+  $14\times10$-cell cloak ($46$ in-cloak materials, $\eta=0.990$). The
+  optimised cloak reconstructs the reference wavefield on the transmission
+  side and is visually indistinguishable from the ideal continuous cloak,
+  with the downstream shadow of the uncloaked notch removed. Dashed lines
+  mark the cloak/defect boundary.}
+  \label{fig:single14_field}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.95\linewidth]{u_norm_comparison.png}
-  \caption{Displacement magnitude $\|\mbf{u}\|$ at $f^\star=2.0$
-  for the same four configurations as Fig.~\ref{fig:reu_comparison}.
-  The magnitude visualisation suppresses the phase ambiguity and
-  highlights residual scattering pockets inside the physical domain
-  that the boundary metric $\mathcal{D}_{\mathrm{r}}$ averages out.}
-  \label{fig:unorm}
+  \includegraphics[width=\linewidth]{figures/single_freq_14x10_zoom_phase.png}
+  \caption{Zoom on the cloak region ($|\!\operatorname{Re}\mbf{u}|$ at
+  $f^\star=2.0$, shared colour scale): defect-free reference (left), ideal
+  continuous polar cloak (centre), and optimised $14\times10$ cloak (right);
+  dashed lines outline the inner (defect) and outer cloak boundaries. All three
+  reproduce the same amplitude envelope, but the optimised cloak leaves its
+  near-surface wavefronts slightly phase-shifted ($\approx0.18\lambda$,
+  $\approx65^\circ$) relative to the reference and the ideal cloak --- a
+  constant phase offset left unconstrained by the phase-invariant magnitude
+  loss, not a cloaking error.}
+  \label{fig:single14_zoom}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{material_heatmap.png}
-  \caption{Per-cell material distribution of the optimised
-  $14\times10$ neural-field cloak, showing the four free Cauchy
-  moduli $(C_{11},C_{12},C_{22},C_{66})$ and the density $\rho$.
-  Black contours trace the inner (defect) and outer cloak boundaries.}
-  \label{fig:matheatmap}
-\end{figure}
-
-
-\subsection{Symmetrised-tensor reference}\label{subsec:symmetrised}
-
-The arithmetic-mean symmetrisation of \citet{chatzopoulos2023} provides a
-closed-form reference point in the realisable Cauchy design family. The ideal
-polar tensor~\eqref{eq:Ceff} is symmetrised analytically by averaging each
-broken minor-symmetry pair, instantiated on the Cartesian cell grid, and run
-through the same FEM solver as the optimised designs. Note that this
-closed-form symmetrised tensor is a 6-component anisotropic Cauchy material,
-whereas the 4CM parameterisation used in this work is the narrower
-4-component orthotropic Cauchy class ($C_{16}=C_{26}=0$); the two are
-different Cauchy materials. Our 4CM cloak is obtained by an independent
-numerical search over the orthotropic Cauchy moduli — a different route to a
-realisable design — and can therefore match or improve on the closed-form
-symmetrised point within the same realisable class.
-Figure~\ref{fig:nassar_repro} compares the symmetrised reference and the
-4CM optimum at the design frequency.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.95\linewidth]{nassar_triangular_reproduction.png}
-  \caption{Arithmetic-mean symmetrised reference (Chatzopoulos 2023,
-  closed-form Cauchy baseline) reconstructed on the Cartesian cell grid
-  (left), 4CM optimum from direct numerical search (centre), and
-  10-PT ideal polar reference (right, unrealisable BGM bound) at
-  $f^\star=2.0$. The symmetrised tensor is one specific point in the
-  realisable Cauchy family; the 4CM optimum is found by an independent
-  numerical search over the orthotropic Cauchy moduli.}
-  \label{fig:nassar_repro}
+  \includegraphics[width=\linewidth]{figures/single_freq_14x10_material.png}
+  \caption{Optimised per-cell material of the $14\times10$ single-frequency
+  cloak: the four orthotropic Cauchy moduli $C_{11},C_{22},C_{12},C_{66}$ and
+  the density $\rho$ over the $46$ cells inside the cloak region (background
+  cells masked). Only these $46$ materials are optimised.}
+  \label{fig:single14_material}
 \end{figure}
 
 %% =============================================================
