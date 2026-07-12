@@ -83,6 +83,11 @@ def main() -> None:
                    help="Comma-separated list of refinement_factor values.")
     p.add_argument("--void-ratio", type=float, default=1e-6)
     p.add_argument("--rho-weight", type=float, default=1.0)
+    p.add_argument("--cell-designs", type=Path, default=None,
+                   help="Directory of inverse/diffusion-designed cells "
+                        "(cell_XXX/canvas.npy + weights.npz). When given, tile THESE "
+                        "microstructures instead of the raw nearest-dataset cells "
+                        "(mirrors frequency_sweep_validated.py --cell-designs).")
     p.add_argument("-o", "--output-dir", default=None,
                    help="Output dir for the CSV (default: <params dir>).")
     p.add_argument("--bail-on-oom", action="store_true",
@@ -96,13 +101,22 @@ def main() -> None:
     out_dir.mkdir(exist_ok=True, parents=True)
     csv_path = out_dir / f"mesh_convergence_validated_f{args.f_star:.2f}.csv"
 
-    print(f"=== Matching cloak cells & assembling canvas ===")
-    # build_canvas also returns matched_cell_C_flat / matched_cell_rho for the
-    # cell-level (homogenised) path; the pixel-level convergence study ignores them.
-    canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, _matched_C, _matched_rho, diag = fsv.build_canvas(
-        Path(args.params), Path(args.dataset), Path(args.config),
-        rho_weight=args.rho_weight,
-    )
+    if args.cell_designs is not None:
+        print(f"=== Tiling INVERSE-DESIGNED cells from {args.cell_designs} ===")
+        canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, _matched_C, _matched_rho, diag = (
+            fsv.build_canvas_from_cell_designs(
+                Path(args.params), Path(args.dataset), Path(args.config),
+                Path(args.cell_designs), rho_weight=args.rho_weight,
+            )
+        )
+    else:
+        print(f"=== Matching cloak cells & assembling canvas (nearest dataset cell) ===")
+        # build_canvas also returns matched_cell_C_flat / matched_cell_rho for the
+        # cell-level (homogenised) path; the pixel-level convergence study ignores them.
+        canvas, (n_x, n_y), (H_pix, W_pix), cloak_bbox, _matched_C, _matched_rho, diag = fsv.build_canvas(
+            Path(args.params), Path(args.dataset), Path(args.config),
+            rho_weight=args.rho_weight,
+        )
     print(
         f"canvas: {canvas.shape}  cloak cells: {diag['n_cloak']}/{diag['n_cells']}  "
         f"unique dataset entries: {diag['n_unique_dataset_entries']}\n"
