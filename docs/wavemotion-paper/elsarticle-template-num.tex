@@ -24,73 +24,73 @@
 
 \begin{document}
 
-%% =============================================================
-\section*{Paper Plan (remove before submission)}
-%% =============================================================
+% %% =============================================================
+% \section*{Paper Plan (remove before submission)}
+% %% =============================================================
 
-\begin{enumerate}
+% \begin{enumerate}
 
-  \item \textbf{Introduction} ---
-    Motivate transformation-elasticity cloaking; establish that the ideal
-    BGM polar tensor is unrealisable by Cauchy materials; survey existing
-    approaches (arithmetic-mean symmetrisation, polar lattices, orthotropic
-    database selection) and their trade-offs; state the contribution:
-    direct differentiable search over four orthotropic Cauchy moduli per
-    cell $(C_{11},C_{12},C_{22},C_{66})$ via a coordinate neural field
-    through a fully differentiable JAX-FEM pipeline, followed by
-    microstructure realisability.
+%   \item \textbf{Introduction} ---
+%     Motivate transformation-elasticity cloaking; establish that the ideal
+%     BGM polar tensor is unrealisable by Cauchy materials; survey existing
+%     approaches (arithmetic-mean symmetrisation, polar lattices, orthotropic
+%     database selection) and their trade-offs; state the contribution:
+%     direct differentiable search over four orthotropic Cauchy moduli per
+%     cell $(C_{11},C_{12},C_{22},C_{66})$ via a coordinate neural field
+%     through a fully differentiable JAX-FEM pipeline, followed by
+%     microstructure realisability.
 
-  \item \textbf{Problem setup and FEM baseline} ---
-    Half-space geometry and Rayleigh-wave excitation; BGM push-forward
-    derivation; triangular carpet shear map; ideal polar tensor
-    $\mbf{c}_{\mathrm{eff}}$ (10 components, broken minor symmetry);
-    cell discretisation on $14\!\times\!10$ Cartesian grid with 4CM
-    Cauchy design variables; JAX-FEM solver and PML; cloaking metrics
-    ($\mathcal{D}_{\mathrm{r}}$, $\mathcal{D}_{\mathrm{out}}$, cloak ratio
-    $\eta$).
+%   \item \textbf{Problem setup and FEM baseline} ---
+%     Half-space geometry and Rayleigh-wave excitation; BGM push-forward
+%     derivation; triangular carpet shear map; ideal polar tensor
+%     $\mbf{c}_{\mathrm{eff}}$ (10 components, broken minor symmetry);
+%     cell discretisation on $14\!\times\!10$ Cartesian grid with 4CM
+%     Cauchy design variables; JAX-FEM solver and PML; cloaking metrics
+%     ($\mathcal{D}_{\mathrm{r}}$, $\mathcal{D}_{\mathrm{out}}$, cloak ratio
+%     $\eta$).
 
-  \item \textbf{Neural-field design pipeline} ---
-    Coordinate MLP outputting $(C_{11},C_{12},C_{22},C_{66},\rho)$;
-    Fourier positional encoding; multiplicative-residual initialisation
-    from transformation-elasticity starting point (TODO confirm init
-    source); loss function: cloaking term + drift penalty; adjoint
-    backpropagation through FEM.
+%   \item \textbf{Neural-field design pipeline} ---
+%     Coordinate MLP outputting $(C_{11},C_{12},C_{22},C_{66},\rho)$;
+%     Fourier positional encoding; multiplicative-residual initialisation
+%     from transformation-elasticity starting point (TODO confirm init
+%     source); loss function: cloaking term + drift penalty; adjoint
+%     backpropagation through FEM.
 
-  \item \textbf{Single-frequency results} ---
-    Compare continuous ideal cloak vs.\ optimised 4CM (per-cell Adam
-    and neural-field reparameterisation) on $14\!\times\!10$ grid; mesh
-    refinement study of the ideal continuous cloak; wavefield and material
-    heatmap visualisations; symmetrised-tensor (Chatzopoulos 2023)
-    closed-form baseline comparison.
+%   \item \textbf{Single-frequency results} ---
+%     Compare continuous ideal cloak vs.\ optimised 4CM (per-cell Adam
+%     and neural-field reparameterisation) on $14\!\times\!10$ grid; mesh
+%     refinement study of the ideal continuous cloak; wavefield and material
+%     heatmap visualisations; symmetrised-tensor (Chatzopoulos 2023)
+%     closed-form baseline comparison.
 
-  \item \textbf{Broadband multifrequency optimisation} ---
-    Single-frequency overfitting demonstration; min--max/mean band
-    objective and annealing schedule; frequency sweep results
-    ($50\!\times\!50$ grid, TODO confirm); Floquet--Bloch dispersion
-    confirming physical admissibility of the broadband optimum.
+%   \item \textbf{Broadband multifrequency optimisation} ---
+%     Single-frequency overfitting demonstration; min--max/mean band
+%     objective and annealing schedule; frequency sweep results
+%     ($50\!\times\!50$ grid, TODO confirm); Floquet--Bloch dispersion
+%     confirming physical admissibility of the broadband optimum.
 
-  \item \textbf{Microstructure-constrained optimisation} ---
-    CA dataset generation and periodic-FEM homogenisation; dataset
-    distribution; GMM realisability prior and constrained loss; diagnostic
-    experiment separating matching gap (${\sim}5\%$) from pixel-vs-homogenised
-    gap (${\sim}25\%$, hidden anisotropy); displacement-field validation;
-    microstructure gallery; broadband micro-constrained extension.
+%   \item \textbf{Microstructure-constrained optimisation} ---
+%     CA dataset generation and periodic-FEM homogenisation; dataset
+%     distribution; GMM realisability prior and constrained loss; diagnostic
+%     experiment separating matching gap (${\sim}5\%$) from pixel-vs-homogenised
+%     gap (${\sim}25\%$, hidden anisotropy); displacement-field validation;
+%     microstructure gallery; broadband micro-constrained extension.
 
-  \item \textbf{Discussion} ---
-    Comparison with Wang (2022) and Chatzopoulos (2023); limitations
-    (square cells, isotropic descriptor); future work (generative
-    realisability manifold, Willis dynamic homogenisation, 3-D extension,
-    polar/Cosserat microstructures to close the broken-minor-symmetry gap).
+%   \item \textbf{Discussion} ---
+%     Comparison with Wang (2022) and Chatzopoulos (2023); limitations
+%     (square cells, isotropic descriptor); future work (generative
+%     realisability manifold, Willis dynamic homogenisation, 3-D extension,
+%     polar/Cosserat microstructures to close the broken-minor-symmetry gap).
 
-  \item \textbf{Conclusion} ---
-    Summarise: four-moduli Cauchy search via neural field as an alternative
-    to closed-form symmetrisation; broadband training; microstructure
-    realisability gap identified for the first time in the elastodynamic
-    regime.
+%   \item \textbf{Conclusion} ---
+%     Summarise: four-moduli Cauchy search via neural field as an alternative
+%     to closed-form symmetrisation; broadband training; microstructure
+%     realisability gap identified for the first time in the elastodynamic
+%     regime.
 
-\end{enumerate}
+% \end{enumerate}
 
-\newpage
+% \newpage
 \begin{frontmatter}
 \title{Neural-field design of broadband Rayleigh-wave carpet cloaks
 under microstructure realisability constraints}
@@ -709,20 +709,21 @@ convergence sweep (Secs.~\ref{subsec:grid_selection}--\ref{subsec:final14}).
 We first ask how far a \emph{single} realisable material can go. Both cloak
 phases are collapsed onto one orthotropic 4CM tile (a $1\times1$ cell filling
 the whole cloak) and its four Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$
-and density are searched by the differentiable FEM at $f^\star=2.0$. The
+and density are optimised through the differentiable FEM at $f^\star=2.0$. The
 natural point of comparison is the closed-form arithmetic-mean symmetrisation
 of \citet{chatzopoulos2023}: the ideal polar tensor~\eqref{eq:Ceff} made
 minor-symmetric by averaging each broken pair, instantiated on the same mesh
 and solved with the same FEM. Both are single homogeneous Cauchy materials,
-so this is a like-for-like test of hand symmetrisation against direct search.
+so this is a like-for-like test of hand symmetrisation against gradient-based
+optimisation.
 
 Table~\ref{tab:single_vs_sym} reports the outcome. The symmetrised tensor
 recovers only $\eta=0.63$ and actually distorts the near field more than the
 bare notch (the ideal-material minor-symmetry violation is large at
-$f^\star=2$). A single searched orthotropic material instead reaches
+$f^\star=2$). A single optimised orthotropic material instead reaches
 $\eta=0.85$ --- a substantial jump towards the ideal continuous polar cloak
 ($\eta=0.999$) obtained from just one degree of material freedom per phase,
-and clear evidence that direct search inside the Cauchy class outperforms
+and clear evidence that optimising inside the Cauchy class outperforms
 symmetrisation. It is, however, still far from perfect: one material cannot
 reproduce the depth variation of the ideal tensor.
 Figure~\ref{fig:single_vs_sym_sweep} confirms that the advantage is
@@ -731,13 +732,10 @@ optimisation.
 
 \begin{table}[htbp]
 \centering
-\caption{Single-frequency cloak ratio $\eta$~\eqref{eq:cloak_ratio} at
-$f^\star=2.0$ for a single homogeneous realisable material. A single
-orthotropic 4CM tile found by direct search ($\eta=0.85$) markedly
-outperforms the closed-form arithmetic-mean symmetrisation of
-\citet{chatzopoulos2023} ($\eta=0.63$), but neither reaches the ideal
-continuous polar cloak. Values from \texttt{output/A\_symmetrized} and
-\texttt{output/A\_1x1flat4\_vs\_symmetrized}.}
+\caption{Single-frequency cloak ratio $\eta$ at $f^\star=2.0$ for a single
+homogeneous realisable material. The optimised orthotropic tile outperforms
+the closed-form symmetrisation of \citet{chatzopoulos2023}, yet neither
+attains the ideal continuous polar cloak.}
 \label{tab:single_vs_sym}
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcc@{}}
 \toprule
@@ -765,7 +763,7 @@ Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar, unrealisable) & $0.999$ & $0.0
   \label{fig:single_vs_sym_sweep}
 \end{figure}
 
-\subsection{Four materials reach $95\%$ cloaking}\label{subsec:four_materials}
+\subsection{How many distinct materials does the cloak need?}\label{subsec:four_materials}
 
 Giving each phase more freedom closes most of the remaining gap. Splitting
 the cloak into a coarse $n_x\times n_y$ grid of independent orthotropic tiles
@@ -781,10 +779,9 @@ gain per added cell is small, motivating a more systematic grid study.
 
 \begin{table}[htbp]
 \centering
-\caption{Single-frequency cloak ratio $\eta$ for small cell decompositions
-of the cloak (each cell is one independent orthotropic 4CM material, all
-optimised jointly at $f^\star=2.0$). Four materials ($2\times2$) already
-reach $\eta=0.962$. Values from \texttt{output/A\_partition\_pushed}.}
+\caption{Cloak ratio $\eta$ at $f^\star=2.0$ for coarse decompositions, each
+cell an independent orthotropic material optimised jointly. Four materials
+($2\times2$) already reach $\eta=0.962$.}
 \label{tab:partition}
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccc@{}}
 \toprule
@@ -807,8 +804,7 @@ To push towards perfect cloaking we refine the grid, but the resolution must
 be chosen so that cloaking has \emph{converged} while the per-iteration cost
 stays low. We therefore run a single-frequency cell sweep over seven
 Cartesian grids from $5\times4$ to $32\times24$, optimising each to
-convergence and recording the cloak ratio
-(Table~\ref{tab:cell_sweep}, Fig.~\ref{fig:cell_sweep}).
+convergence and recording the cloak ratio (Table~\ref{tab:cell_sweep}).
 
 A key point is that materials are assigned only to cells whose centre falls
 between the inner and outer triangles~\eqref{eq:triangles}, so an
@@ -816,10 +812,8 @@ $n_x\times n_y$ grid uses far fewer than $n_x n_y$ materials: the triangular
 cloak occupies only a fraction of its Cartesian bounding box. The
 $14\times10$ grid nominally spans $140$ cells but places only
 \textbf{46 cells inside the cloak region}; these $46$ are the actual design
-variables, the remaining $94$ being background. (The figures in
-parentheses in Fig.~\ref{fig:cell_sweep} are these in-cloak counts:
-$5\times4\!\to\!7$, $8\times6\!\to\!16$, $10\times8\!\to\!28$,
-$14\times10\!\to\!46$, and so on.)
+variables, the remaining $94$ being background (see the ``cloak cells'' column
+of Table~\ref{tab:cell_sweep}).
 
 The cloak ratio saturates on a plateau at $\eta\approx0.99$
 ($|1-\eta|\approx0.01$) by $14\times10$: the three finer grids
@@ -828,17 +822,15 @@ even a marginal regression from FEM cost and optimisation noise --- while
 their cell counts, and hence solve cost, grow several-fold. The $14\times10$
 grid is the smallest decomposition sitting firmly on this converged
 sub-$1\%$ plateau, and we adopt it for all subsequent single-frequency
-work: it is stable (on the flat part of the curve), cheap (only $46$ active
+work: it is stable (on the plateau), cheap (only $46$ active
 materials), and fast to optimise.
 
 \begin{table}[htbp]
 \centering
-\caption{Single-frequency cell-convergence sweep at $f^\star=2.0$. Each grid
-is optimised to convergence; ``cloak cells'' is the number of cells whose
-centre lies inside the triangular cloak and therefore carries design
-variables (far fewer than $n_x n_y$). The cloak ratio plateaus at
-$\eta\approx0.99$ by $14\times10$; finer grids do not improve it. Values from
-\texttt{output/A\_cell\_sweep}.}
+\caption{Cell-convergence sweep at $f^\star=2.0$: cloak ratio $\eta$ versus
+grid resolution. ``Cloak cells'' counts the cells inside the triangular cloak
+(the active design variables, far fewer than $n_x n_y$). Cloaking plateaus at
+$\eta\approx0.99$ from $14\times10$ onward.}
 \label{tab:cell_sweep}
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
 \toprule
@@ -854,18 +846,6 @@ $32\times24$          & 768 & 256 & $0.988$ & $0.012$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.8\linewidth]{figures/cell_sweep_histogram.png}
-  \caption{Cloaking error $|1-\eta|$ versus cell decomposition in the
-  single-frequency sweep; numbers in parentheses on the axis are the
-  in-cloak cell counts. The error drops sharply up to $10\times8$
-  ($28$ cloak cells) and then flattens: $14\times10$ ($46$ cloak cells) is
-  the smallest grid on the converged sub-$1\%$ plateau, with finer grids
-  giving no further improvement.}
-  \label{fig:cell_sweep}
-\end{figure}
 
 \subsection{Near-perfect cloaking on the $14\times10$ grid}\label{subsec:final14}
 
@@ -934,100 +914,80 @@ the $46$ cloak cells.
 \section{Broadband multifrequency optimisation}\label{sec:multifreq}
 %% =============================================================
 
-\subsection{Single-frequency overfitting}
 
-A neural-field cloak trained at a single design frequency $f^\star$
-overfits aggressively: the cloak loss exhibits a sharp minimum at
-$f^\star$ and degrades quickly away from it
-(Fig.~\ref{fig:freq_overfitting}). Two independent runs trained at
-$f^\star=2.5$ and $f^\star=3.0$ produce cloaks whose responses are
-nearly disjoint outside a band of width $\Delta f^\star\approx0.2$
-around their respective design frequencies. This behaviour is structurally identical to
-narrow-band overfitting in topology-optimised acoustic cloaks
-\citep{andkjaer2013} and motivates a multifrequency training objective.
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.85\linewidth]{single_freq_comparison.png}
-  \caption{Frequency response of two independently optimised
-  $50\times50$ % TODO confirm grid (14×10?)
-  neural-field cloaks, each trained at a single frequency
-  ($f^\star=2.5$ and $f^\star=3.0$). The sharp minima at the
-  training frequencies illustrate frequency-specific overfitting.}
-  \label{fig:freq_overfitting}
-\end{figure}
+The single-frequency designs of Sec.~\ref{sec:single_freq} are optimised at
+one frequency and, being tuned to it, cloak well only in a narrow neighbourhood
+of $f^\star=2$: away from the design frequency the cloak ratio falls off
+markedly (Fig.~\ref{fig:single_vs_sym_sweep}). Because the ideal triangular
+tensor~\eqref{eq:Ceff} is frequency-independent and cloaks exactly at every
+frequency, this narrowness is a limitation of the single-frequency
+\emph{objective}, not of the material class. We therefore train a single design
+against a band of frequencies at once.
 
-\subsection{Reference sweeps}\label{subsec:ref_sweeps}
+\subsection{Band objective}\label{subsec:band_objective}
 
-Before introducing the optimised broadband design we record two
-reference frequency sweeps on the chosen $50\times50$ % TODO confirm grid (14×10?)
-cell decomposition: the ideal continuous $\mbf{c}_{\mathrm{eff}}$ cloak and
-the uncoated defect (``obstacle''). Both are evaluated on the same
-$N$-point grid $\{f_1,\dots,f_N\}$ spanning the target band
-$[f_{\min},f_{\max}]$. The ideal sweep furnishes the lower envelope
-attainable without microstructure constraints; the obstacle sweep is
-the worst-case upper envelope. Together they bound the optimisation
-target and let us state per-frequency cloaking quality as a fraction of
-the available gap (Sec.~\ref{subsec:ratio_chart}).
-Figure~\ref{fig:reference_sweeps} reports both.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.8\linewidth]{reference_sweeps.png}
-  \caption{Reference frequency sweeps on the target band: continuous
-  $\mbf{c}_{\mathrm{eff}}$ cloak (lower envelope) and uncoated defect
-  (upper envelope). Shaded region is the gap closed by optimisation.}
-  \label{fig:reference_sweeps}
-\end{figure}
-
-\subsection{Min--max/mean objective}
-
-For a target frequency band $\{f_1,\dots,f_N\}$ we replace
-$\mcl{L}_{\mathrm{cloak}}$ in~\eqref{eq:opt_loss} by the convex
-combination
-\be\label{eq:minmax}
+The broadband loss is the average of the single-frequency magnitude-band
+integral~\eqref{eq:opt_loss_cloak} over a finite set $\mcl{S}$ of frequencies
+sampling the target band,
+\be\label{eq:band_loss}
   \mcl{L}_{\mathrm{band}}(\theta)
-  = \alpha\,\max_i \mcl{L}(f_i;\theta)
-  + (1-\alpha)\,\frac{1}{N}\sum_i \mcl{L}(f_i;\theta),
+  = \frac{1}{\textstyle\sum_{f\in\mcl{S}}w_f}
+    \sum_{f\in\mcl{S}} w_f\,\mcl{L}_{\mathrm{cloak}}(\theta;f),
 \ee
-with $\alpha$ annealed from $1$ to $0$ during training. The pure
-min--max regime ($\alpha=1$) prevents the optimiser from trading
-performance at one frequency for another; relaxing $\alpha$ towards $0$
-sharpens the final solution once the loss landscape has been levelled.
-Figure~\ref{fig:multifreq_sweep} shows that this schedule produces a
-flat, low loss over the entire target band $f^\star\in[1.0,\,4.0]$.
+where $\mcl{L}_{\mathrm{cloak}}(\theta;f)$ is~\eqref{eq:opt_loss_cloak}
+evaluated at frequency $f$ against the corresponding defect-free reference field
+$\mbf{u}_{\mathrm{ref}}(f)$. Equal weights $w_f=1$ minimise the mean in-band
+distortion; the weights are free to emphasise particular frequencies, and a
+worst-case (min--max) variant that up-weights the currently least-cloaked
+frequency can be used to flatten the response across the band. A single neural
+field $\Phi_\theta$ produces the shared per-cell material, so the same design is
+required to cloak at every $f\in\mcl{S}$ simultaneously.
+
+The objective~\eqref{eq:band_loss} places no restriction on which band is
+targeted: any $\mcl{S}$ can be chosen, and the optimiser returns the best single
+realisable design over that band. The only cost is computational --- every
+optimisation step evaluates a forward and an adjoint FEM solve per frequency, so
+the per-step cost scales linearly with $|\mcl{S}|$. The frequencies are
+independent and solved in parallel across a worker pool, bounded in practice
+only by the memory of the concurrent sparse factorisations.
+
+\subsection{Frequency sweep}\label{subsec:multifreq_results}
+
+We optimise the $14\times10$ design (the same $46$ in-cloak Cauchy materials and
+neural field as in Sec.~\ref{sec:single_freq}) against the band
+$f^\star\in[1,3]$, sampled at seven uniformly spaced frequencies
+$\mcl{S}=\{1.0,1.33,1.67,2.0,2.33,2.67,3.0\}$ with equal weights. The macro mesh
+is sized to resolve the shortest wavelength in the band (at $f^\star=3$) and
+reused across all frequencies. To probe generalisation beyond the training
+frequencies, the converged design is then evaluated on a dense sweep
+$f^\star\in[0,4]$ and compared against the uncloaked notch and the ideal
+continuous polar cloak on the same mesh (Fig.~\ref{fig:multifreq_sweep}).
+
+Across the training band the optimised cloak holds the cloak ratio near unity at
+every frequency: $\eta$ stays in the range $0.92$--$0.99$ with an in-band mean
+of $0.96$ and a worst case of $|1-\eta|\approx0.08$ at the lower band edge,
+where the uncloaked notch instead drops to $\eta\approx0.31$
+($|1-\eta|\approx0.69$) near mid-band. The ideal continuous cloak remains at
+$\eta\approx1$ throughout, as expected for the frequency-independent triangular
+tensor. The single design thus recovers most of the single-frequency
+performance simultaneously over the whole octave-plus band, rather than at one
+frequency only. Outside the training band the improvement degrades gracefully
+--- $\eta\approx0.78$ at $f^\star=3.5$ and $\approx0.60$ at $f^\star=4.0$ ---
+confirming that the objective~\eqref{eq:band_loss} broadens the cloaking
+response over the targeted band rather than trivially across all frequencies.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.7\linewidth]{multifreq_sweep.png}
-  \caption{Frequency sweep of a single $50\times50$ % TODO confirm grid (14×10?)
-  neural-field cloak optimised with the multifrequency
-  objective~\eqref{eq:minmax}.}
+  \includegraphics[width=0.9\linewidth]{figures/multifreq_sweep.png}
+  \caption{Frequency sweep of the cloak ratio
+  $\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ for the
+  broadband $14\times10$ design trained on the band $f^\star\in[1,3]$ (shaded):
+  the ideal continuous transformation cloak (red, $\eta\approx1$ at every
+  frequency), the uncloaked notch (black, dashed), and the broadband optimised
+  cloak (blue). The optimised design holds $\eta\approx0.96$ across the entire
+  training band and degrades gracefully outside it.}
   \label{fig:multifreq_sweep}
-\end{figure}
-
-\subsection{Cloaking ratio across the band}\label{subsec:ratio_chart}
-
-The dimensionless cloak ratio
-$\eta(f) = \langle|\mbf{u}_{\mathrm{cloak}}(f)|\rangle / \langle|\mbf{u}_{\mathrm{ref}}(f)|\rangle$
-on the free surface beyond the cloak is reported across the target band in
-Figure~\ref{fig:u_ratio}. The optimised neural-field cloak holds
-$\eta\approx 1$ throughout the band; the obstacle remains far from
-unity and the ideal cloak provides a moving target close to but not
-identically one (the residual gap is the mesh-convergence floor of
-Sec.~\ref{subsec:mesh_conv}). The same ratio is the objective used in
-the microstructure-constrained pipeline of Sec.~\ref{sec:micro}.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.8\linewidth]{u_ratio_chart.png}
-  \caption{Cloaking ratio
-  $\eta(f)=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$
-  on the free surface beyond the cloak across the target band, for the
-  obstacle, the continuous $\mbf{c}_{\mathrm{eff}}$ cloak, and the
-  optimised neural-field cloak. A flat $\eta\approx 1$ is the broadband
-  cloaking ideal.}
-  \label{fig:u_ratio}
 \end{figure}
 
 \subsection{Floquet--Bloch dispersion}\label{subsec:bloch}
@@ -1053,35 +1013,6 @@ resonant bandgaps to suppress transmission-side amplitude.
   \label{fig:bloch}
 \end{figure}
 
-\subsection{Results}
-
-Figure~\ref{fig:sweep-compare} reports the per-frequency cloak loss of
-the neural-field reparameterisation across the target band.
-The neural-field run produces a flat, low response across the entire band,
-reaching a band-averaged metric value of $0.985$. % confirm 4CM
-Figure~\ref{fig:mat-compare} shows the optimised $(C,\rho)$ fields; the
-neural field, unconstrained by a prior and fed high-order Fourier
-features, produces sharp designs with fine spatial features.
-Floquet--Bloch analysis of the multifrequency optimum
-(Sec.~\ref{subsec:bloch}) confirms that the resulting unit cell supports
-the propagation regime expected at the band centre.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.7\linewidth]{frequency_sweep_vis_NF.png}
-  \caption{Per-frequency cloak loss of the neural-field reparameterisation
-  across the target band. The broadband training flattens the response
-  with respect to single-frequency optimisation.}
-  \label{fig:sweep-compare}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth,height=0.38\textheight,keepaspectratio]{material_field_NF.png}
-  \caption{Optimised $(C,\rho)$ material fields produced by the
-  neural-field reparameterisation.}
-  \label{fig:mat-compare}
-\end{figure}
 
 %% =============================================================
 \section{Microstructure-constrained optimisation}\label{sec:micro}
