@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex elsarticle-template-num"] 1783862127.0196 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1783862132.75192 0
+["bibtex elsarticle-template-num"] 1783936290.36179 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1783936296.93118 0
   "./cas-refs.bib" 1783704907.16769 8294 7373cec622d46b1f66cdde755f7879ed ""
   "./elsarticle-num-names.bst" 1783701782.28213 28896 ef8ea1833e4d69d9f60b6db23b4bea61 ""
-  "elsarticle-template-num.aux" 1783862132.15441 19424 4b2018968cc9a16c6b6837759b757bf1 "pdflatex"
+  "elsarticle-template-num.aux" 1783936296.58963 18972 c50677e16528d9a9d037b6a000a273fa "pdflatex"
   (generated)
   "elsarticle-template-num.bbl"
   "elsarticle-template-num.blg"
   (rewritten before read)
-["pdflatex"] 1783862127.20946 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1783862132.75242 2
+["pdflatex"] 1783936290.47166 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1783936296.93134 2
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1136849721 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm" 1136768653 3584 2d666ecf6d466d8b007246bc2f94d9da ""
@@ -73,6 +73,7 @@
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1248133631 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb" 1248133631 32716 08e384dc442464e7285e891af9f45947 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb" 1248133631 32626 4f5c1b83753b1dd3a97d1b399a005b4b ""
+  "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/symbols/msam10.pfb" 1248133631 31764 459c573c03a4949a528c2cc7f557e217 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb" 1248133631 34694 ad62b13721ee8eda1dcc8993c8bd7041 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb" 1215737283 145408 43d44302ca7d82d487f511f83e309505 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb" 1215737283 140176 d4962f948b4cc0adf4d3dde77a128c95 ""
@@ -194,14 +195,15 @@
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1772288159 3636404 0d6b22a798b2c182d7f754d1f98c8969 ""
   "/usr/local/texlive/2025/texmf.cnf" 1772288092.0538 455 5b996dcaa0eb4ef14a83b026bc0a008c ""
   "bloch_dispersion.png" 0 -1 0 ""
-  "dataset_distribution.png" 0 -1 0 ""
-  "displacement_field_validation.png" 0 -1 0 ""
-  "elsarticle-template-num.aux" 1783862132.15441 19424 4b2018968cc9a16c6b6837759b757bf1 "pdflatex"
-  "elsarticle-template-num.bbl" 1783862127.20395 10163 d4c1525daa0636fcbc9533cc61d2a2fa "bibtex elsarticle-template-num"
-  "elsarticle-template-num.spl" 1783862127.52729 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "elsarticle-template-num.tex" 1783862080.31807 67099 3de480306f1b161c51541b02f8a0c6e3 ""
+  "elsarticle-template-num.aux" 1783936296.58963 18972 c50677e16528d9a9d037b6a000a273fa "pdflatex"
+  "elsarticle-template-num.bbl" 1783936290.46737 10337 4b48284aedeae90bfa8a4d962aeeb438 "bibtex elsarticle-template-num"
+  "elsarticle-template-num.spl" 1783936290.6766 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "elsarticle-template-num.tex" 1783936231.84696 66498 543a4f15cfd800f25c1e789a71427b91 ""
   "elsarticle.cls" 1783701773.0841 45216 8d57180189bc20f55de1fd7b66d8c091 ""
-  "figures/ml-pipeline.png" 1783775975.89406 1466150 cf8c6c1140135fbfa8a414ebdd717c2a ""
+  "figures/cloak_microstructure_diffusion.png" 1783875427.32856 64007 edc25636e54e69f69b2d72ce14904b05 ""
+  "figures/cloak_microstructure_inverse.png" 1783875427.32927 65273 14d15c298f1fb30b950b8acd0a09946b ""
+  "figures/micro_method_comparison_sweep.png" 1783890299.92308 110317 2547ca0a6175effee8385ca232f3c78b ""
+  "figures/ml-pipeline.png" 1783890424.00516 1285497 c1b9a25f2293b8889035f2a791db8048 ""
   "figures/multifreq_sweep.png" 1783860609.30335 97702 9300ce0d8dc1e4741faf99af69a29817 ""
   "figures/problem-setup.png" 1783775979.71308 611416 c5c74405cfbbf03902ff1f38a3ab7440 ""
   "figures/single_freq_14x10_material.png" 1783852995.24717 433118 dde1bdfc957dbea19eae87905dfde98f ""
@@ -209,9 +211,6 @@
   "figures/single_freq_14x10_zoom_phase.png" 1783855713.58278 999014 a42cffda0550563c7bbe2d0e76ac0351 ""
   "figures/single_vs_symmetrized_sweep.png" 1783852995.23163 143116 5d15ede98cd7fcddedb967422499e58a ""
   "figures/triangular-cell-decomposition.png" 1783775984.45809 156594 4c59707e5ce8df02485312d86ddc1298 ""
-  "microstructure_gallery.png" 0 -1 0 ""
-  "multifreq_micro_sweep.png" 0 -1 0 ""
-  "pipeline.png" 0 -1 0 ""
   (generated)
   "elsarticle-template-num.aux"
   "elsarticle-template-num.log"
