@@ -1249,15 +1249,17 @@ reflecting per-cell target-matching error rather than a hidden
 homogenisation gap, since the $D_2$-invariant cells carry the full
 orthotropic (4CM) stiffness.
 
-\paragraph{Limitations.} The cell discretisation imposes a piecewise-constant
-material approximation whose square cells cannot conform exactly to the
-inclined cloak interfaces; the residual right-boundary distortion of the
-continuous tensor is dominated by FEM error rather than by an intrinsic
-limit of the transformation. The microstructure pipeline is currently
-restricted to a two-phase (single-constituent/void) substrate and a
-quasi-static homogenised descriptor. The realised cloak is validated at the
-unit-cell level, since a mesh-converged pixel-resolved solve of the full
-domain remains computationally out of reach (Sec.~\ref{sec:micro}).
+\paragraph{Limitations.} The cloak is discretised into square cells, each
+carrying a single homogenised material, so the piecewise-constant grid cannot
+follow arbitrary cloak interfaces exactly, and the microstructure pipeline
+is restricted to a two-phase (single-constituent and void) substrate described
+by a quasi-static homogenised stiffness. We also validate the realised cloak
+one cell at a time rather than by simulating the fully assembled
+microstructure: the cells are so fine relative to the wavelength that meshing
+every feature across the whole cloak is impractical, while that same scale
+separation is what makes the homogenised description reliable in the first
+place. A direct full-domain pixel simulation is left to future work
+(Sec.~\ref{sec:micro}).
 
 \paragraph{Future work.} The same differentiable pipeline, coupling a
 neural field to a finite-element solver, applies to other Rayleigh-wave
