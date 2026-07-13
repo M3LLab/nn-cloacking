@@ -1212,19 +1212,13 @@ ideal tensor~\eqref{eq:Ceff}.
 \paragraph{On pixel-level validation.} Because the cloak satisfies strong scale
 separation --- the Rayleigh wavelength spans
 $S=\lambda_R/\delta\approx190$--$600$ micro-pixels --- asymptotic homogenisation
-guarantees that a mesh-converged, pixel-resolved solve of the full cloak
-reproduces the homogenised cloak ratio to within
+implies that a mesh-converged, pixel-resolved solve of the full cloak would
+reproduce the homogenised cloak ratio to within
 $\mcl{O}\bigl((d_{\mathrm{cell}}/\lambda_R)^2\bigr)\approx2\%$. The matched
 homogenised $\eta$ of Table~\ref{tab:micro_methods} is therefore the physically
-relevant metric. A brute-force pixel-resolved solve of the whole macro domain is
-correspondingly redundant, and at the resolution needed to preserve the thin
-cement ligaments ($\gtrsim2$ elements per micro-pixel over the entire cloak,
-$\sim\!10^{7}$--$10^{8}$ degrees of freedom) it is computationally infeasible; at
-attainable resolutions an unstructured mesh aliases the ligaments and the ratio
-fails to converge --- a discretisation artefact rather than a physical loss. We
-therefore anchor the realisation at the unit-cell level, where each generated
-cell reproduces its target stiffness under the same periodic-FEM homogenisation
-used to build the catalogue.
+relevant metric. We therefore validate at the unit-cell level, where each
+generated cell reproduces its target stiffness under the same periodic-FEM
+homogenisation used to build the catalogue.
 
 %% =============================================================
 \section{Discussion}\label{sec:discussion}
