@@ -1269,8 +1269,12 @@ queried during optimisation (a guided diffusion model in the spirit
 of~\citet{yang2024}); this model still generates one unit cell at a
 time, and producing a full multiscale image of the cloak, where
 neighbouring cells connect and vary smoothly across the domain, is an
-open problem that may again be a good fit for diffusion models. Two
-further extensions stand out. Moving from the two-dimensional carpet
+open problem that may again be a good fit for diffusion models. Such a
+generator would also relax the square-cell grid used here, which cannot
+conform to the inclined cloak interfaces: laying cells out on a
+body-fitted mesh would let the microstructure follow the interfaces and
+remove a source of residual boundary distortion. Two further extensions
+stand out. Moving from the two-dimensional carpet
 cloak to a three-dimensional cloak; the differentiable JAX-FEM pipeline
 carries over, but the cost of the full solve grows sharply. And
 designing beyond the four-parameter orthotropic Cauchy class: the ideal
