@@ -1094,6 +1094,28 @@ target is kept (\emph{best-of-$N$}). The generative prior keeps every sample
 inside the manifold of manufacturable cells while exploring a diverse set of
 realisations for each target.
 
+Figure~\ref{fig:micro_bestof_dumbbell} quantifies how well each method hits its
+per-cell target across the $100$ cloak cells. Both improve on the
+nearest-neighbour snap (mean avg-component stiffness error $8.9\%$): inverse
+design reaches $5.9\%$ (lower error on $81/100$ cells) and best-of-$N$ diffusion
+$7.0\%$ ($62/100$). A per-cell best-of selection --- keeping, for each cell, the
+lower-error of the generator and the NN snap --- caps the mean at $5.9\%$ and
+$6.3\%$ respectively. As Section~\ref{subsec:micro_results} shows, however, this
+per-cell stiffness accuracy does not translate directly into whole-cloak
+performance.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/micro_bestof_dumbbell.png}
+  \caption{Per-cell stiffness-matching error over the $100$ cloak cells for the
+  two realisation methods against NN (Nearest Neighbor) retrieval: (a)~NN +
+  inverse design, (b)~NN + diffusion. Each row is a cell; the bar links the NN
+  error (grey) to the per-cell best-of selection (blue, the lower-error of the
+  two). Best-of lowers the mean avg-component stiffness error from $8.9\%$ to
+  $5.9\%$ (inverse) and $6.3\%$ (diffusion); cells are sorted by NN error.}
+  \label{fig:micro_bestof_dumbbell}
+\end{figure}
+
 \subsection{Results}\label{subsec:micro_results}
 
 Table~\ref{tab:micro_methods} reports the cloak ratio at $f^\star=2.0$ on the

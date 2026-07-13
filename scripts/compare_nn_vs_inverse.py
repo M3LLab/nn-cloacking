@@ -47,6 +47,70 @@ def nn_match(target5: np.ndarray, X: np.ndarray, rho_weight: float = 1.0) -> np.
     return X[int(np.argmin(d2))]
 
 
+def compute_rows(cd: Path, ds, rho_weight: float = 1.0) -> list[dict]:
+    """Read every cell_*/weights.npz under ``cd`` → per-cell NN vs design errors.
+
+    Returns a list of dicts (sorted by NN avg-component error) with keys
+    cell, nn, inv (per-component % arrays), and nn_max/inv_max/nn_avg/inv_avg.
+    """
+    rows = []
+    for wpath in sorted(cd.glob("cell_*/weights.npz")):
+        cell_idx = int(wpath.parent.name.split("_")[1])
+        d = np.load(str(wpath))
+        if "pred_flat4" not in d or "target_flat4" not in d:
+            continue
+        tgt4 = np.asarray(d["target_flat4"], dtype=np.float64)
+        prd4 = np.asarray(d["pred_flat4"], dtype=np.float64)
+        trho = float(d["target_rho"]); prho = float(d["pred_rho"])
+        tgt5 = np.append(tgt4, trho)
+        nn5 = nn_match(tgt5, ds.X, rho_weight)
+        prd5 = np.append(prd4, prho)
+
+        nn_rel = np.abs((nn5 - tgt5) / (np.abs(tgt5) + 1e-30)) * 100.0
+        inv_rel = np.abs((prd5 - tgt5) / (np.abs(tgt5) + 1e-30)) * 100.0
+        rows.append(dict(cell=cell_idx, nn=nn_rel, inv=inv_rel,
+                         nn_max=float(nn_rel.max()), inv_max=float(inv_rel.max()),
+                         nn_avg=float(nn_rel.mean()), inv_avg=float(inv_rel.mean())))
+    rows.sort(key=lambda r: r["nn_avg"])
+    return rows
+
+
+def draw_dumbbell(ax, rows: list[dict], title: str = "",
+                  design_label: str = "inverse design",
+                  max_labels: int = 40, show_ylabel: bool = True) -> None:
+    """Draw the NN → design per-cell dumbbell into ``ax`` (fixed size, thinned labels).
+
+    Rows must already be sorted (see compute_rows).  Only ~``max_labels`` evenly
+    spaced cell-index tick labels are shown so they never overlap regardless of n.
+    """
+    n = len(rows)
+    nn_avg = np.array([r["nn_avg"] for r in rows])
+    inv_avg = np.array([r["inv_avg"] for r in rows])
+    improved = inv_avg < nn_avg
+    y = np.arange(n)
+    for i in range(n):
+        c = "#2ecc71" if improved[i] else "#e74c3c"
+        ax.plot([nn_avg[i], inv_avg[i]], [y[i], y[i]], "-", color=c, lw=1.0, alpha=0.7, zorder=1)
+    ax.scatter(nn_avg, y, c="#7f8c8d", s=16, label="NN match", zorder=2)
+    ax.scatter(inv_avg, y, c="#2980b9", s=16, label=design_label, zorder=3)
+
+    step = max(1, int(np.ceil(n / max_labels)))
+    ticks = y[::step]
+    ax.set_yticks(ticks)
+    ax.set_yticklabels([rows[i]["cell"] for i in ticks], fontsize=7)
+    ax.set_ylim(-0.7, n - 0.3)
+    ax.set_xlabel("avg-component relative error (%)", fontsize=10)
+    if show_ylabel:
+        ax.set_ylabel("cell", fontsize=10)
+    n_imp = int(improved.sum())
+    sub = (f"{title}\nNN {nn_avg.mean():.1f}% → design {inv_avg.mean():.1f}%   "
+           f"improved {n_imp}/{n} ({100 * n_imp / n:.0f}%)")
+    ax.set_title(sub, fontsize=10)
+    ax.legend(fontsize=8, loc="lower right")
+    ax.grid(alpha=0.3, axis="x")
+    ax.tick_params(labelsize=8)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -65,29 +129,9 @@ def main() -> None:
 
     ds = load_dataset_for_matching(args.dataset_path)
 
-    rows = []
-    for wpath in sorted(cd.glob("cell_*/weights.npz")):
-        cell_idx = int(wpath.parent.name.split("_")[1])
-        d = np.load(str(wpath))
-        if "pred_flat4" not in d or "target_flat4" not in d:
-            continue
-        tgt4 = np.asarray(d["target_flat4"], dtype=np.float64)
-        prd4 = np.asarray(d["pred_flat4"], dtype=np.float64)
-        trho = float(d["target_rho"]); prho = float(d["pred_rho"])
-        tgt5 = np.append(tgt4, trho)
-        nn5 = nn_match(tgt5, ds.X, args.nn_rho_weight)
-        prd5 = np.append(prd4, prho)
-
-        nn_rel = np.abs((nn5 - tgt5) / (np.abs(tgt5) + 1e-30)) * 100.0
-        inv_rel = np.abs((prd5 - tgt5) / (np.abs(tgt5) + 1e-30)) * 100.0
-        rows.append(dict(cell=cell_idx, nn=nn_rel, inv=inv_rel,
-                         nn_max=float(nn_rel.max()), inv_max=float(inv_rel.max()),
-                         nn_avg=float(nn_rel.mean()), inv_avg=float(inv_rel.mean())))
-
+    rows = compute_rows(cd, ds, args.nn_rho_weight)
     if not rows:
         sys.exit(f"No completed cells with predictions found in {cd}")
-
-    rows.sort(key=lambda r: r["nn_avg"])
     n = len(rows)
     nn_max = np.array([r["nn_max"] for r in rows])
     inv_max = np.array([r["inv_max"] for r in rows])
@@ -163,6 +207,14 @@ def main() -> None:
     fig.savefig(str(out_png), dpi=120, bbox_inches="tight")
     plt.close(fig)
 
+    # ── standalone dumbbell figure (the middle panel, on its own) ────────
+    db_png = out_png.with_name(out_png.stem + "_dumbbell" + out_png.suffix)
+    fig2, ax2 = plt.subplots(figsize=(6.5, 8.0))
+    draw_dumbbell(ax2, rows, title="NN → inverse design, per cell (sorted by NN error)",
+                  design_label="inverse design")
+    fig2.savefig(str(db_png), dpi=120, bbox_inches="tight")
+    plt.close(fig2)
+
     # ── console summary ──────────────────────────────────────────────
     print(f"\n{n} cells.")
     print(f"  AVG-component rel err (proxy) %:  NN mean {nn_avg.mean():5.2f} median {np.median(nn_avg):5.2f}"
@@ -174,8 +226,9 @@ def main() -> None:
     print("  per-component mean |err| %  NN -> inverse:")
     for j, l in enumerate(_LABELS):
         print(f"    {l:4s}: {nn_comp[:,j].mean():5.2f} -> {inv_comp[:,j].mean():5.2f}")
-    print(f"\nFigure → {out_png}")
-    print(f"CSV    → {csv}")
+    print(f"\nFigure   → {out_png}")
+    print(f"Dumbbell → {db_png}")
+    print(f"CSV      → {csv}")
 
 
 if __name__ == "__main__":
