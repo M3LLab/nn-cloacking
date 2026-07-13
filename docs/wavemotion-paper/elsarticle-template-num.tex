@@ -1259,22 +1259,24 @@ quasi-static homogenised descriptor. The realised cloak is validated at the
 unit-cell level, since a mesh-converged pixel-resolved solve of the full
 domain remains computationally out of reach (Sec.~\ref{sec:micro}).
 
-\paragraph{Future work.} The most direct extension is to stop snapping
-to a discrete database altogether and to learn a generative model of
-the realisable manifold that can be queried differentiably during
-optimisation (e.g.\ a guided diffusion model in the spirit
-of~\citet{yang2024}). A second extension is to incorporate dynamic
-homogenisation or Willis-type effective tensors into the
-microstructure descriptor, extending its validity towards the shorter
-wavelengths where finite-wavelength corrections to the quasi-static
-homogenised response grow. A third extension is to move from the
-two-dimensional carpet cloak to three-dimensional configurations, for
-which the differentiable JAX-FEM pipeline carries over without
-qualitative change. A fourth extension is to design beyond the
-four-parameter orthotropic Cauchy class by realising the broken minor
-symmetry of the ideal polar tensor via Cosserat or polar microstructures,
-directly closing the gap between the BGM prescription and the realisable
-design.
+\paragraph{Future work.} The same differentiable pipeline, coupling a
+neural field to a finite-element solver, applies to other Rayleigh-wave
+design problems beyond carpet cloaking, such as wave focusing,
+waveguiding, and vibration isolation, by changing only the objective. On
+the realizability side, we have already replaced the discrete database
+with a differentiable generative model of the realisable manifold,
+queried during optimisation (a guided diffusion model in the spirit
+of~\citet{yang2024}); this model still generates one unit cell at a
+time, and producing a full multiscale image of the cloak, where
+neighbouring cells connect and vary smoothly across the domain, is an
+open problem that may again be a good fit for diffusion models. Two
+further extensions stand out. Moving from the two-dimensional carpet
+cloak to a three-dimensional cloak; the differentiable JAX-FEM pipeline
+carries over, but the cost of the full solve grows sharply. And
+designing beyond the four-parameter orthotropic Cauchy class: the ideal
+polar tensor breaks minor symmetry, so realising it needs Cosserat or
+polar microstructures and a different homogenisation method than the
+quasi-static Cauchy one used here.
 
 %% =============================================================
 \section{Conclusion}\label{sec:conclusion}
