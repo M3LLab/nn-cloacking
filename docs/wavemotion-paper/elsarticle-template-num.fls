@@ -311,6 +311,11 @@ INPUT ./figures/multifreq_sweep.png
 INPUT ./figures/multifreq_sweep.png
 INPUT ./figures/multifreq_sweep.png
 INPUT /usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ectt1200.tfm
+INPUT ./figures/micro_bestof_dumbbell.png
+INPUT ./figures/micro_bestof_dumbbell.png
+INPUT ./figures/micro_bestof_dumbbell.png
+INPUT ./figures/micro_bestof_dumbbell.png
+INPUT ./figures/micro_bestof_dumbbell.png
 INPUT ./figures/micro_method_comparison_sweep.png
 INPUT ./figures/micro_method_comparison_sweep.png
 INPUT ./figures/micro_method_comparison_sweep.png

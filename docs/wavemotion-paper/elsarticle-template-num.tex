@@ -1094,15 +1094,10 @@ target is kept (\emph{best-of-$N$}). The generative prior keeps every sample
 inside the manifold of manufacturable cells while exploring a diverse set of
 realisations for each target.
 
-Figure~\ref{fig:micro_bestof_dumbbell} quantifies how well each method hits its
-per-cell target across the $100$ cloak cells. Both improve on the
-nearest-neighbour snap (mean avg-component stiffness error $8.9\%$): inverse
-design reaches $5.9\%$ (lower error on $81/100$ cells) and best-of-$N$ diffusion
-$7.0\%$ ($62/100$). A per-cell best-of selection --- keeping, for each cell, the
-lower-error of the generator and the NN snap --- caps the mean at $5.9\%$ and
-$6.3\%$ respectively. As Section~\ref{subsec:micro_results} shows, however, this
-per-cell stiffness accuracy does not translate directly into whole-cloak
-performance.
+Figure~\ref{fig:micro_bestof_dumbbell} quantifies how well each method improves its
+per-cell target across the $100$ cloak cells compared to the nearest-neighbour snap. 
+Section~\ref{subsec:micro_results} shows, however, this per-cell stiffness accuracy 
+does not translate directly into whole-cloak performance.
 
 \begin{figure}[htbp]
   \centering
