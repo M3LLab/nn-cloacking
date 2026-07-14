@@ -163,23 +163,15 @@ cloaks~\citep{wang2022}. For Rayleigh waves specifically,
 \citet{chatzopoulos2023} compared triangular and semi-circular carpet
 cloaks and symmetrised their tensors by the arithmetic mean, reporting the
 symmetrised quadratic semi-circular design as the best performing.
+The triangular cloak is, however, especially attractive because its piecewise-affine transformation 
+has a constant Jacobian within each half of the cloak and consequently, the required effective 
+material properties are homogeneous in each region.
 
-The triangular geometry is, however, especially attractive. Its
-transformation is a shear with a constant gradient in each half of the
-cloak, so the ideal tensor is homogeneous there -- two mirror-image phases --
-and non-singular; being frequency-independent, it cloaks exactly at every
-frequency. Our approach to find a design inside the Cauchy class of ordinary
+Our approach to find a design inside the Cauchy class of ordinary
 materials is a differentiable pipeline built on a JAX-FEM solver~\citep{xu2020jaxfem}
 that evaluates a wave-field cloaking objective, with gradients flowing
-end-to-end through the FEM adjoint. We first use it to search for the best
-single realisable material -- the orthotropic Cauchy moduli
-$(C_{11},C_{12},C_{22},C_{66})$ that most closely reproduce the ideal
-response, rather than fixing them by symmetrisation. To improve on it while
-staying realisable, we then discretise the cloak into a regular grid of
-cells and let a coordinate-based neural field assign each cell its own
-Cauchy moduli and density; this per-cell freedom compensates for the broken
-minor symmetry better than any single homogeneous material can. We optimise
-at a single frequency and then across a target band. This
+end-to-end through the FEM adjoint. We optimise
+at a single frequency and across a target band. This
 improves substantially on the symmetrised designs of
 \citet{chatzopoulos2023}. The neural field acts as an implicit material
 representation, of the kind used for scene reconstruction in computer
@@ -193,7 +185,13 @@ the network instead outputs an anisotropic stiffness tensor and density and
 is trained against a frequency-domain elastodynamic cloaking objective, so
 as to approximate the non-symmetric transformation-elasticity material.
 
-We then take the design one step further, to an explicit realisation. Each
+We first use the pipeline to search for the best
+single realisable material -- the orthotropic Cauchy moduli
+$(C_{11},C_{12},C_{22},C_{66})$ that most closely reproduce the ideal
+response, rather than fixing them by symmetrisation. To improve on it while
+staying realisable, we then discretise the cloak into a regular grid of
+cells and let a coordinate-based neural field assign each cell its own
+Cauchy moduli and density. We then take the design one step further, to an explicit realisation. Each
 cell is filled with a two-phase (solid/void) microstructure drawn from a
 database of homogenised unit cells~\citep{nakarmi2024}; the cells share a
 single common base material and differ only in their internal geometry, so
@@ -222,19 +220,19 @@ limitations, and Section~\ref{sec:conclusion} concludes.
 \section{Problem setup and FEM baseline}\label{sec:setup}
 %% =============================================================
 
-Figure~\ref{fig:setup} summarises the computational configuration. A
-time-harmonic vertical point force applied on the traction-free surface
-of an isotropic half-space $(\lambda,\mu,\rho)$ launches a Rayleigh wave
-that propagates horizontally towards a triangular surface notch. The
-rectangular domain of width $W=12.5\,b$ and depth $H$ is truncated by
-Perfectly Matched Layer (PML) absorbing regions on the two lateral
-sides and the bottom; the top surface remains traction-free. The inset
-(Fig.~\ref{fig:setup}b) shows the cloak geometry in detail: the
-triangular defect of depth $a$ and half-width $c$ is enclosed by the
-outer cloak boundary at depth $b$, whose two inclined faces define the
-inner and outer triangle boundaries $z_1$ and $z_2$; the two mirror
-phases of the cloak (related by the sign change of the shear $F_{21}$
-across the centreline $X_1=0$) are shaded separately.
+% Figure~\ref{fig:setup} summarises the computational configuration. A
+% time-harmonic vertical point force applied on the traction-free surface
+% of an isotropic half-space $(\lambda,\mu,\rho)$ launches a Rayleigh wave
+% that propagates horizontally towards a triangular surface notch. The
+% rectangular domain of width $W=12.5\,b$ and depth $H$ is truncated by
+% Perfectly Matched Layer (PML) absorbing regions on the two lateral
+% sides and the bottom; the top surface remains traction-free. The inset
+% (Fig.~\ref{fig:setup}b) shows the cloak geometry in detail: the
+% triangular defect of depth $a$ and half-width $c$ is enclosed by the
+% outer cloak boundary at depth $b$, whose two inclined faces define the
+% inner and outer triangle boundaries $z_1$ and $z_2$; the two mirror
+% phases of the cloak (related by the sign change of the shear $F_{21}$
+% across the centreline $X_1=0$) are shaded separately.
 
 \begin{figure}[htbp]
   \centering
@@ -499,8 +497,8 @@ optimisation of the per-cell stiffness and density.
 
 \subsection{Cloaking metrics}
 
-We use three relative $L^2$ metrics. The \emph{right-boundary
-distortion}
+We report three diagnostic metrics. Two are relative $L^2$
+distortions. The \emph{right-boundary distortion}
 \be\label{eq:distortion}
   \mathcal{D}_{\mathrm{r}}
   = 100\,\frac{\|\mbf{u}_{\mathrm{cloak}} - \mbf{u}_{\mathrm{ref}}\|_{L^2(\partial\Omega_{\mathrm{right}})}}
@@ -513,10 +511,13 @@ integral over $\Omega_{\mathrm{phys}}\setminus\overline{\Omega}_{\mathrm{cloak}}
 captures the global wavefield perturbation; it is closely related to
 the objective used by \citet{wang2022}. In broadband sections we also
 report the dimensionless cloak ratio
-$\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ over
+$\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ over
 the free surface beyond the cloak footprint, following
-\citet{chatzopoulos2023}; this is the cloaking objective used in the
-microstructure-constrained pipeline.
+\citet{chatzopoulos2023}; it is an interpretable evaluation metric, with
+$\eta\to1$ for a perfect cloak. These three quantities are diagnostics,
+\emph{not} the training objective: optimisation minimises the
+phase-invariant magnitude-band integral~\eqref{eq:opt_loss_cloak}, and
+the microstructure-constrained pipeline inherits the same objective.
 
 \begin{figure}[htbp]
   \centering
@@ -1022,7 +1023,7 @@ resonant bandgaps to suppress transmission-side amplitude.
 The cloaks of Sec.~\ref{sec:multifreq} are tensor-valued: each cloak cell
 carries a homogenised $(\mbf{C}_{\mathrm{4CM}},\rho)$ that need not correspond to
 any manufacturable object. We now close the loop to an explicit, single-material
-realisation, in which every cloak cell is filled with a two-phase cement/void
+realisation, in which every cloak cell is filled with a two-phase solid/void
 microstructure whose homogenised stiffness reproduces the optimised target, so
 that the whole cloak can be built from one constituent by varying only the
 internal pattern from cell to cell. We first constrain the neural-field
@@ -1035,7 +1036,7 @@ validate the realised cloak.
 
 \paragraph{Step 1 -- Microstructure dataset.} A catalogue of $N\sim10^{6}$
 binary $50\times50$ unit cells is generated by a squared-assembly cellular
-automaton on a cement/void substrate, following the cellular-automaton
+automaton on a solid/void substrate, following the cellular-automaton
 generative approach of \citet{nakarmi2024}, who assemble a large,
 topologically diverse library of mesostructures by evolving a pixel grid
 under neighbour-count birth/death/survival rules.
@@ -1066,7 +1067,7 @@ Sec.~\ref{sec:constrained} keep every intermediate design admissible.
 
 \paragraph{Step 5 -- Microstructure realisation.} Each optimised per-cell target
 $(\mbf{C}_{\mathrm{4CM}},\rho)$ is turned into an explicit $50\times50$
-cement/void cell by one of the two generative methods of
+solid/void cell by one of the two generative methods of
 Sec.~\ref{subsec:micro_methods} (or a nearest-neighbour dataset baseline).
 
 \paragraph{Step 6 -- Evaluation.} The macro FEM is re-solved with every cloak
@@ -1124,7 +1125,7 @@ microstructures costs performance in proportion to how well each method hits its
 per-cell target. The nearest-neighbour dataset snap retains only $\eta=0.82$,
 the neural-field inverse design lifts this to $\eta=0.94$, and the best-of-$N$
 diffusion realisation recovers $\eta=0.97$ --- within $3\%$ of the continuous
-optimum using only fabricable cement/void cells.
+optimum using only fabricable solid/void cells.
 
 \begin{table}[htbp]
 \centering
@@ -1177,7 +1178,7 @@ field.
 
 \subsection{Realised cloak and validation}\label{subsec:micro_realisation}
 
-Figure~\ref{fig:micro_tiling} shows the explicit cement/void realisation of the
+Figure~\ref{fig:micro_tiling} shows the explicit solid/void realisation of the
 cloak: the $100$ generated $50\times50$ cells tiled at the macro-cell positions
 they occupy inside the triangular carpet, with the surface notch and the
 surrounding half-space. The whole cloak is a single cement phase perforated by a
