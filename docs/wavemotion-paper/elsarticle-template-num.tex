@@ -710,11 +710,11 @@ Table~\ref{tab:single_vs_sym} reports the outcome. The symmetrised tensor
 recovers only $\eta=0.63$ and actually distorts the near field more than the
 bare notch (the ideal-material minor-symmetry violation is large at
 $f^\star=2$). A single optimised orthotropic material instead reaches
-$\eta=0.85$ --- a substantial jump towards the ideal continuous polar cloak
+$\eta=0.86$ --- a substantial jump towards the ideal continuous polar cloak
 ($\eta=0.999$) obtained from just one degree of material freedom per phase,
 and clear evidence that optimising inside the Cauchy class outperforms
-symmetrisation. It is, however, still far from perfect: one material cannot
-reproduce the depth variation of the ideal tensor.
+symmetrisation. It is, however, still far from perfect:
+one material most certainly cannot reproduce the cloaking of the ideal tensor.
 Figure~\ref{fig:single_vs_sym_sweep} confirms that the advantage is
 concentrated around the design frequency, as expected for a single-frequency
 optimisation.
@@ -726,15 +726,15 @@ homogeneous realisable material. The optimised orthotropic tile outperforms
 the closed-form symmetrisation of \citet{chatzopoulos2023}, yet neither
 attains the ideal continuous polar cloak.}
 \label{tab:single_vs_sym}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcc@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lc@{}}
 \toprule
-Configuration & $\eta$ & $|1-\eta|$ \\
+Configuration & $\eta$ \\
 \midrule
-Uncoated notch (no cloak)                                   & $0.37$  & $0.63$ \\
-Symmetrised ideal (Chatzopoulos, closed-form Cauchy)        & $0.634$ & $0.366$ \\
-Single optimised material ($1\times1$, 4CM)                 & $0.850$ & $0.150$ \\
+Obstacle (no cloak)                                   & $0.37$  \\
+Symmetrised ideal (Chatzopoulos)        & $0.634$ \\
+Single optimised material ($1\times1$, 4CM)                 & $0.857$ \\
 \midrule
-Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar, unrealisable) & $0.999$ & $0.001$ \\
+Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & $0.999$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
@@ -748,7 +748,7 @@ Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar, unrealisable) & $0.999$ & $0.0
   (red, $\eta\approx1$ at every frequency), the closed-form symmetrised
   tensor of \citet{chatzopoulos2023} (purple), and the single optimised
   $1\times1$ material (blue). At the training frequency $f^\star=2$ the
-  optimised material recovers $\eta=0.85$ against $0.63$ for symmetrisation.}
+  optimised material recovers $\eta=0.86$ against $0.63$ for symmetrisation.}
   \label{fig:single_vs_sym_sweep}
 \end{figure}
 
@@ -1121,17 +1121,17 @@ $f^\star=2.0$ ($100$ cloak cells): cloak ratio $\eta$ (homogenised, matched) for
 the three cell-realisation strategies, against the continuous 4CM optimum and the
 ideal polar cloak. Best-of-$N$ diffusion recovers $\eta=0.97$.}
 \label{tab:micro_methods}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcc@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lc@{}}
 \toprule
-Realisation of the $100$ cloak cells & $\eta$ & $|1-\eta|$ \\
+Realisation of the $100$ cloak cells & $\eta$ \\
 \midrule
-Continuous 4CM optimum (homogenised, GMM-constrained)          & $0.990$ & $0.010$ \\
+Continuous 4CM optimum (homogenised, GMM-constrained)          & $0.990$ \\
 \midrule
-Nearest-neighbour dataset match                                & $0.816$ & $0.184$ \\
-Inverse design (neural field)                                  & $0.936$ & $0.064$ \\
-\textbf{Diffusion (best-of-$N$)}                               & $\mathbf{0.967}$ & $\mathbf{0.033}$ \\
+Nearest-neighbour dataset match                                & $0.816$ \\
+Inverse design (neural field)                                  & $0.936$ \\
+\textbf{Diffusion (best-of-$N$)}                               & $\mathbf{0.967}$ \\
 \midrule
-Ideal continuous polar $\mbf{c}_{\mathrm{eff}}$ (unrealisable) & $0.999$ & $0.001$ \\
+Ideal continuous polar $\mbf{c}_{\mathrm{eff}}$ & $0.999$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
