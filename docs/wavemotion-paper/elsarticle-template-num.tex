@@ -45,9 +45,8 @@
 %     derivation; triangular carpet shear map; ideal polar tensor
 %     $\mbf{c}_{\mathrm{eff}}$ (10 components, broken minor symmetry);
 %     cell discretisation on $14\!\times\!10$ Cartesian grid with 4CM
-%     Cauchy design variables; JAX-FEM solver and PML; cloaking metrics
-%     ($\mathcal{D}_{\mathrm{r}}$, $\mathcal{D}_{\mathrm{out}}$, cloak ratio
-%     $\eta$).
+%     Cauchy design variables; JAX-FEM solver and PML; cloaking metric
+%     (cloak ratio $\eta$).
 
 %   \item \textbf{Neural-field design pipeline} ---
 %     Coordinate MLP outputting $(C_{11},C_{12},C_{22},C_{66},\rho)$;
@@ -497,27 +496,15 @@ optimisation of the per-cell stiffness and density.
 
 \subsection{Cloaking metrics}
 
-We report three diagnostic metrics. Two are relative $L^2$
-distortions. The \emph{right-boundary distortion}
-\be\label{eq:distortion}
-  \mathcal{D}_{\mathrm{r}}
-  = 100\,\frac{\|\mbf{u}_{\mathrm{cloak}} - \mbf{u}_{\mathrm{ref}}\|_{L^2(\partial\Omega_{\mathrm{right}})}}
-              {\|\mbf{u}_{\mathrm{ref}}\|_{L^2(\partial\Omega_{\mathrm{right}})}}\,,
-\ee
-measures the transmission-side mismatch with respect to the defect-free
-reference. The \emph{outside-cloak distortion}
-$\mathcal{D}_{\mathrm{out}}$ replaces the boundary integral by an
-integral over $\Omega_{\mathrm{phys}}\setminus\overline{\Omega}_{\mathrm{cloak}}$ and
-captures the global wavefield perturbation; it is closely related to
-the objective used by \citet{wang2022}. In broadband sections we also
-report the dimensionless cloak ratio
+The design objective is the magnitude-band
+integral~\eqref{eq:opt_loss_cloak}: the mean-squared relative error of
+the displacement magnitude over a near-surface strip beyond the cloak, 
+which optimisation minimises. To report performance we also
+use the dimensionless cloak ratio
 $\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ over
 the free surface beyond the cloak footprint, following
 \citet{chatzopoulos2023}; it is an interpretable evaluation metric, with
-$\eta\to1$ for a perfect cloak. These three quantities are diagnostics,
-\emph{not} the training objective: optimisation minimises the
-phase-invariant magnitude-band integral~\eqref{eq:opt_loss_cloak}, and
-the microstructure-constrained pipeline inherits the same objective.
+$\eta\to1$ for a perfect cloak.
 
 \begin{figure}[htbp]
   \centering
