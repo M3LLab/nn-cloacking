@@ -577,15 +577,12 @@ poorly conditioned gradients in practice.
 \subsection{Physical admissibility of the material output}\label{sec:constrained}
 
 The multiplicative residual~\eqref{eq:neural_relative} places no bound on
-the sign or the anisotropy of the moduli: an unconstrained MLP can drive
+the microstructure realisability -- MLP can drive
 a stiffness negative, break the positive-definiteness of the Cauchy
 tensor, or reach an anisotropy ratio no real microstructure can realise.
 Rather than police these violations with penalty terms after the fact, we
-build them into the decoding, so that \emph{every} network output --- at
-initialisation, along the optimisation path, and at convergence --- is a
-physically admissible material by construction. The optimiser therefore
-searches only over the manifold of valid tensors and never has to be
-projected back onto it.
+build them into the decoding, so that every network output is a
+physically admissible material by construction.
 
 The network still emits four unbounded raw channels
 $\mbf{r}=(r_{11},r_{22},r_{66},r_{12})=\Phi_\theta^{(C)}(x,y)$ per cloak
@@ -632,10 +629,8 @@ coupling $C_{12}^{(0)}$. Non-cloak cells bypass the decoding and keep
 their background values exactly.
 
 Together, \eqref{eq:constr_diag}--\eqref{eq:constr_c12} turn the raw
-network outputs into a smooth, everywhere-differentiable surjection onto
-the set of positive-definite, bounded-anisotropy Cauchy tensors, so the
-transformation-elasticity initialisation is recovered at $\mbf{r}=\mbf 0$
-and every gradient step lands on an admissible design.
+network outputs into a smooth, everywhere-differentiable map onto
+the set of positive-definite, bounded-anisotropy Cauchy tensors.
 
 \subsection{Loss function}
 
