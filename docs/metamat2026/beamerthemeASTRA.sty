@@ -1,0 +1,323 @@
+%% beamerthemeASTRA.sty
+%% Custom Beamer theme for ASTRA 2026
+%% Aerospace Symposium on Technological Research Advancements
+%% Department of Aerospace Engineering, IIST Thiruvananthapuram
+
+\ProvidesPackage{beamerthemeASTRA}[2026/01/01 ASTRA 2026 Beamer Theme]
+
+\RequirePackage{tikz}
+\RequirePackage{xcolor}
+\RequirePackage{graphicx}
+\RequirePackage{ifthen}
+\RequirePackage{calc}
+\RequirePackage{etoolbox}
+\RequirePackage{microtype}
+
+% ---------------------------------------------------------------
+% Colour palette (extracted from original PPTX theme)
+% ---------------------------------------------------------------
+\definecolor{ASTRAnavy}     {HTML}{0D2B5E}   % Deep navy – primary brand
+\definecolor{ASTRAblue}     {HTML}{156082}   % Header blue
+\definecolor{ASTRAdarkblue} {HTML}{0E2841}   % Darkest blue (dk2)
+\definecolor{ASTRAaccent}   {HTML}{1A73C8}   % Author / link blue
+\definecolor{ASTRAgold}     {HTML}{C8A84B}   % Superscript / accent gold
+\definecolor{ASTRAorange}   {HTML}{E97132}   % Accent 2
+\definecolor{ASTRAlight}    {HTML}{E8E8E8}   % Light grey (lt2)
+\definecolor{ASTRAwhite}    {HTML}{FFFFFF}
+\definecolor{ASTRAbglight}  {HTML}{F4F8FC}   % Slide body background tint
+\definecolor{ASTRAfooter}   {HTML}{0D2B5E}   % Footer bar colour
+
+% ---------------------------------------------------------------
+% Font setup
+% ---------------------------------------------------------------
+\usefonttheme{serif}
+\setbeamerfont{title}{family=\rmfamily, size=\Large, series=\bfseries}
+\setbeamerfont{frametitle}{family=\rmfamily, size=\normalsize, series=\bfseries}
+\setbeamerfont{author}{family=\rmfamily, size=\small}
+\setbeamerfont{institute}{family=\rmfamily, size=\footnotesize}
+\setbeamerfont{date}{family=\rmfamily, size=\footnotesize}
+\setbeamerfont{footline}{size=\footnotesize}
+\setbeamerfont{block title}{family=\rmfamily, series=\bfseries, size=\small}
+\setbeamerfont{itemize/enumerate body}{size=\footnotesize}
+\setbeamerfont{itemize/enumerate subbody}{size=\scriptsize}
+\setbeamerfont{block body}{size=\footnotesize}
+\setbeamerfont{block body alerted}{size=\footnotesize}
+\setbeamerfont{block body example}{size=\footnotesize}
+\setbeamerfont{bibliography item}{size=\footnotesize}
+\setbeamerfont{bibliography entry author}{size=\footnotesize}
+\setbeamerfont{bibliography entry title}{size=\footnotesize}
+\setbeamerfont{bibliography entry location}{size=\footnotesize}
+\setbeamerfont{bibliography entry note}{size=\footnotesize}
+
+
+% ---------------------------------------------------------------
+% Colour theme
+% ---------------------------------------------------------------
+\setbeamercolor{palette primary}   {bg=ASTRAnavy,    fg=ASTRAwhite}
+\setbeamercolor{palette secondary} {bg=ASTRAblue,    fg=ASTRAwhite}
+\setbeamercolor{palette tertiary}  {bg=ASTRAdarkblue,fg=ASTRAwhite}
+\setbeamercolor{structure}         {fg=ASTRAblue}
+\setbeamercolor{frametitle}        {bg=ASTRAblue,    fg=ASTRAwhite}
+\setbeamercolor{title}             {fg=ASTRAnavy}
+\setbeamercolor{author}            {fg=ASTRAaccent}
+\setbeamercolor{institute}         {fg=ASTRAnavy}
+\setbeamercolor{date}              {fg=ASTRAnavy}
+\setbeamercolor{normal text}       {fg=ASTRAnavy,    bg=ASTRAwhite}
+\setbeamercolor{alerted text}      {fg=ASTRAorange}
+\setbeamercolor{example text}      {fg=ASTRAblue}
+\setbeamercolor{block title}       {bg=ASTRAblue,    fg=ASTRAwhite}
+\setbeamercolor{block body}        {bg=ASTRAbglight, fg=ASTRAnavy}
+\setbeamercolor{block title alerted}{bg=ASTRAorange, fg=ASTRAwhite}
+\setbeamercolor{block body alerted} {bg=ASTRAlight,  fg=ASTRAnavy}
+\setbeamercolor{itemize item}      {fg=ASTRAblue}
+\setbeamercolor{itemize subitem}   {fg=ASTRAaccent}
+\setbeamercolor{enumerate item}    {fg=ASTRAblue}
+\setbeamercolor{footline}          {bg=ASTRAfooter,  fg=ASTRAwhite}
+\setbeamercolor{headline}          {bg=ASTRAnavy,    fg=ASTRAwhite}
+\setbeamercolor{separation line}   {bg=ASTRAgold}
+
+% ---------------------------------------------------------------
+% Inner theme – bullet shapes
+% ---------------------------------------------------------------
+\useinnertheme{default}
+\setbeamertemplate{itemize item}{\small\raise0.5pt\hbox{\textcolor{ASTRAblue}{$\blacktriangleright$}}}
+\setbeamertemplate{itemize subitem}{\footnotesize\raise0.5pt\hbox{\textcolor{ASTRAaccent}{$\triangleright$}}}
+\setbeamertemplate{enumerate item}{\textcolor{ASTRAblue}{\insertenumlabel.}}
+
+% ---------------------------------------------------------------
+% Navigation symbols – hide them
+% ---------------------------------------------------------------
+\setbeamertemplate{navigation symbols}{}
+
+% ---------------------------------------------------------------
+% HEADLINE – Cleared out (merged into frametitle)
+% ---------------------------------------------------------------
+\setbeamertemplate{headline}{}
+
+% ---------------------------------------------------------------
+% FRAMETITLE – Single merged banner with logos and slide title
+% ---------------------------------------------------------------
+\setbeamertemplate{frametitle}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    
+    %% 1. Right-side background for ASTRA logo (Light tint for contrast)
+    \fill[ASTRAblue!20!ASTRAwhite] 
+        ([xshift=-2.5cm] current page.north east) rectangle
+        ([yshift=-1.1cm] current page.north east);
+
+    %% 2. Main dark navy bar with a chevron pointing right
+    \fill[ASTRAnavy]
+        (current page.north west) --
+        ([xshift=-2.5cm, yshift=0cm] current page.north east) --
+        ([xshift=-1.8cm, yshift=-0.55cm] current page.north east) --
+        ([xshift=-2.5cm, yshift=-1.1cm] current page.north east) --
+        ([yshift=-1.1cm] current page.north west) -- cycle;
+        
+    %% 3. Thin gold separation line at the bottom of the banner
+    \fill[ASTRAgold]
+        ([yshift=-1.1cm] current page.north west) rectangle
+        ([yshift=-1.14cm] current page.north east);
+
+    %% 4. Left Logo (IIST)
+    % \node[anchor=west]
+    %     at ([xshift=0.3cm, yshift=-0.55cm] current page.north west)
+    %     {\includegraphics[height=0.8cm]{m3l-dark.png}}; 
+        
+    %% 5. Right Logo (ASTRA)
+    \node[anchor=center]
+        at ([xshift=-0.9cm, yshift=-0.55cm] current page.north east)
+        {\includegraphics[height=0.8cm]{cropped-Metamat-logo.png}}; % <-- Change lowercase 'a' to uppercase 'A'
+
+    %% 6. Slide Title Text (Aligned left, right next to IIST logo)
+    \node[anchor=west, text=ASTRAwhite, font=\Large\bfseries\rmfamily]
+        at ([xshift=1.4cm, yshift=-0.55cm] current page.north west)
+        {\insertframetitle};
+        
+  \end{tikzpicture}%
+  
+  %% Add vertical space to push the actual slide content down below the banner
+  \vspace{0.8cm}
+}
+
+% ---------------------------------------------------------------
+% FOOTLINE – navy bar with date | conference | page
+% ---------------------------------------------------------------
+\setbeamertemplate{footline}{%
+  \begin{beamercolorbox}[wd=\paperwidth, ht=0.48cm, dp=0.2cm,
+        leftskip=0.4cm, rightskip=0.4cm]{footline}%
+    \usebeamerfont{footline}%
+    \rlap{Ajaccio, 20--24 July 2026}%
+    \hfill METAMAT 2026\hfill
+    \llap{\insertframenumber}%
+  \end{beamercolorbox}%
+}
+
+% ---------------------------------------------------------------
+% TITLE PAGE template
+% ---------------------------------------------------------------
+\defbeamertemplate*{title page}{ASTRA}[1][]{%
+  \begin{tikzpicture}[remember picture, overlay]
+    
+    %% 1. Right-side background for ASTRA logo (Light tint for contrast)
+    \fill[ASTRAblue!20!ASTRAwhite] 
+        ([xshift=-3.5cm] current page.north east) rectangle
+        ([yshift=-1.65cm] current page.north east);
+
+    %% 2. Main dark navy bar with a chevron pointing right
+    \fill[ASTRAnavy]
+        (current page.north west) --
+        ([xshift=-3.5cm, yshift=0cm] current page.north east) --
+        ([xshift=-2.5cm, yshift=-0.825cm] current page.north east) --
+        ([xshift=-3.5cm, yshift=-1.65cm] current page.north east) --
+        ([yshift=-1.65cm] current page.north west) -- cycle;
+
+    %% 3. Thin gold separation line at the bottom of the top banner
+    \fill[ASTRAgold]
+        ([yshift=-1.65cm] current page.north west) rectangle
+        ([yshift=-1.69cm] current page.north east);
+        
+    %% Left Logo (IIST)
+    \node[anchor=west]
+        at ([xshift=0.4cm, yshift=-0.85cm] current page.north west)
+        {\includegraphics[height=2.0cm]{metamat_header.png}};
+        
+    % Right Logo (M3L) - Centered beautifully in the lighter pocket
+    \node[anchor=center]
+        at ([xshift=-1.25cm, yshift=-0.825cm] current page.north east)
+         {\includegraphics[height=1.0cm]{m3l.jpeg}}
+        ;
+
+    %% Title Text
+    %% (Shifted slightly left so it is visually centered between the IIST logo and the Chevron tip)
+    % \node[anchor=center, text=ASTRAwhite, font=\small\bfseries\rmfamily]
+    %     at ([xshift=-0.5cm, yshift=-0.825cm] current page.north)
+    %     {METAMAT 2026 $|$ International Conference on Metamaterials};
+
+    %% Bottom navy bar
+    \fill[ASTRAnavy] ([yshift=0.55cm] current page.south west) rectangle
+        (current page.south east);
+        
+    %% Footer text
+    \node[anchor=west, text=ASTRAwhite, font=\tiny\rmfamily]
+        at ([xshift=0.3cm, yshift=0.275cm] current page.south west)
+        {\insertinstitute};
+    \node[anchor=east, text=ASTRAwhite, font=\scriptsize\rmfamily]
+        at ([xshift=-0.3cm, yshift=0.275cm] current page.south east)
+        {Paper ID: \paperid};
+  \end{tikzpicture}%
+  
+  %% --- NEW POSITIONING LOGIC ---
+  %% The asterisk (*) locks this space from the top banner, preventing the title from floating up
+  \vspace*{1.5cm} 
+  
+  \begin{center}
+    % Title box
+    \begin{beamercolorbox}[wd=0.88\paperwidth, rounded=true, shadow=false,
+          sep=12pt, center, colsep*=0pt]{block body alerted}%
+      \usebeamerfont{title}\color{ASTRAnavy}\inserttitle%
+    \end{beamercolorbox}
+    \vspace{0.5em}
+    
+    % Authors
+    {\usebeamerfont{author}\color{ASTRAnavy}\insertauthor}\\[1.2em]
+    
+    % Affiliations
+    {\usebeamerfont{institute}\color{ASTRAnavy}\affiliations}
+  \end{center}
+  
+  \vfill % This acts as a spring, pushing the conference info down to the footer
+  
+\begin{center}
+    % Corresponding author (changed to \scriptsize)
+    {\scriptsize\rmfamily\color{ASTRAnavy}\correspondingauthor}\\
+    
+    
+    % Department and Institute info
+    % {\footnotesize\rmfamily\color{ASTRAnavy}Department of Aerospace Engineering}\\
+    % {\footnotesize\rmfamily\color{ASTRAnavy}Indian Institute of Space Science and Technology (IIST), Thiruvananthapuram $|$ 4--6 June, 2026}
+  \end{center}
+  \vspace*{0.2cm} % Small safety gap above the bottom banner
+}
+% ---------------------------------------------------------------
+% Convenience command for paper metadata
+% ---------------------------------------------------------------
+\newcommand{\paperid}{}
+\newcommand{\setPaperID}[1]{\renewcommand{\paperid}{#1}}
+
+\newcommand{\affiliations}{}
+\newcommand{\setAffiliations}[1]{\renewcommand{\affiliations}{#1}}
+
+\newcommand{\correspondingauthor}{}
+\newcommand{\setCorrespondingAuthor}[1]{\renewcommand{\correspondingauthor}{#1}}
+
+% ---------------------------------------------------------------
+% Three-column methodology layout environment
+% ---------------------------------------------------------------
+\newenvironment{methodcols}{%
+  \begin{columns}[T]%
+}{%
+  \end{columns}%
+}
+
+\newcommand{\methodcol}[2]{%
+  \begin{column}{0.32\textwidth}
+    \begin{block}{#1}
+      #2
+    \end{block}
+  \end{column}
+}
+
+% ---------------------------------------------------------------
+% Thank-you / acknowledgements slide
+% ---------------------------------------------------------------
+\newcommand{\thankyouslide}[1]{%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture, overlay]
+      
+      %% Top navy bar
+      \fill[ASTRAnavy] (current page.north west) rectangle
+          ([yshift=-1.1cm] current page.north east);
+          
+      %% Thin gold separation line
+      \fill[ASTRAgold] ([yshift=-1.1cm] current page.north west) rectangle
+          ([yshift=-1.14cm] current page.north east);
+
+      %% Symposium Title Text (Centered horizontally and vertically in the bar)
+      % \node[anchor=center, text=ASTRAwhite, font=\normalsize\bfseries\rmfamily]
+      %     at ([yshift=-0.55cm] current page.north)
+      %     {ASTRA 2026 $|$ Aerospace Symposium on Technological Research Advancements};
+          
+      %% Bottom navy bar
+      \fill[ASTRAnavy] ([yshift=0.55cm] current page.south west) rectangle
+          (current page.south east);
+          
+      %% Footer Text (Centered and increased font size)
+      % \node[anchor=center, text=ASTRAwhite, font=\footnotesize\rmfamily]
+      %     at ([yshift=0.275cm] current page.south)
+      %     {Department of Aerospace Engineering, Indian Institute of Space Science and Technology (IIST), Thiruvananthapuram};
+    \end{tikzpicture}
+    
+    \vspace*{1.0cm}
+    \begin{center}
+      % Thank You text (Deep navy blue)
+      {\fontsize{36}{42}\selectfont\bfseries\rmfamily\color{ASTRAnavy}Thank You}\\[0.6em]
+      
+      % Thin separation line (Gold)
+      {\color{ASTRAgold}\rule{6cm}{0.8pt}}\\[0.8em]
+      
+      % Acknowledgements Box (Light gray box, text centered)
+      \begin{beamercolorbox}[wd=0.88\paperwidth, rounded=true, sep=10pt, center]{block body alerted}
+        \centering % <--- This centers the paragraph text inside the box
+        {\small\bfseries\rmfamily\color{ASTRAblue}Acknowledgements}\\[0.5em]
+        {\footnotesize\rmfamily\color{ASTRAnavy}#1}
+      \end{beamercolorbox}
+      
+      \vspace{0.3cm}
+      
+      % Logos: IIST and ASTRA Banner
+      \includegraphics[height=2cm]{m3l.jpeg} 
+      % \hspace{2.5cm} % Gap between the two logos
+      % \includegraphics[height=2cm]{ASTRA_Banner} % Ensure your file is named ASTRA_Banner.png, .jpg, or .pdf
+    \end{center}
+  \end{frame}%
+}
