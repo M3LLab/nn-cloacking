@@ -19,7 +19,10 @@
 \usepackage{beamerthemeASTRA}   % custom theme (in same folder)
 
 % ---- Additional packages ----
-\usepackage{amsmath, amssymb, bm}
+% amssymb is deliberately NOT loaded: newtxmath already provides the AMS
+% symbols, and the duplicate symbol fonts overflow LaTeX's 16-font limit
+% once animate is loaded.
+\usepackage{amsmath, bm}
 \usepackage{booktabs}
 \usepackage{multicol}
 \usepackage{caption}
@@ -30,6 +33,10 @@
 \usepackage{ragged2e}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,fit,backgrounds,shapes.geometric}
+% Frame-by-frame animation embedded in the PDF (needs a JS-capable viewer:
+% Adobe Reader, Okular, pdfpc; other viewers show the first frame only).
+% Frames are regenerated from figures/*.mp4 -- see figures/make_frames.sh
+\usepackage{animate}
 
 % ---- Find figures from the paper and the latent-optim note ----
 \graphicspath{{./}{../wavemotion-paper/figures/}{../latent_optim/}{./logos/}}
@@ -105,7 +112,7 @@
       \begin{enumerate}
         \setlength{\itemsep}{0.55em}
         \item {\normalsize The dream: a cloak for surface waves}
-        \item {\normalsize The catch: exact cloaks are unbuildable}
+        \item {\normalsize The catch: analytical cloaks are unbuildable}
         \item {\normalsize Idea: \emph{let a network find the material}}
         \item {\normalsize Four ML routes to a real structure}
           \begin{itemize}\footnotesize
@@ -135,10 +142,10 @@
       \begin{block}{The goal}
         \begin{itemize}
           \item A \textbf{Rayleigh wave} rolls along the free surface of a
-                half-space. A surface \emph{notch} scatters it and casts a
-                downstream shadow.
+                half-space. A surface \emph{inclusion} scatters it and 
+                sensibly affects the displacement field beyond the defect.
           \item A \textbf{carpet cloak} is a coating that makes the surface
-                wave behave as if the notch were not there.
+                wave behave as if the inclusion were not there.
           \item Applications: seismic protection, surface-acoustic-wave
                 devices, non-destructive testing.
         \end{itemize}
@@ -151,7 +158,54 @@
       % FIGURE: problem-setup.png  (domain + PML + point source + triangular cloak)
       \includegraphics[width=\linewidth]{problem-setup.png}\\
       {\scriptsize Half-space, PML boundaries, a time-harmonic point source,
-      and the triangular cloak over the notch.}
+      and the triangular cloak over the inclusion.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+%  SLIDE 5 -- Transformation elasticity: the exact recipe
+% ------------------------------------------------------------
+\begin{frame}{Transformation elasticity: the exact cloak}
+  % Tight display skips: this slide trades text space for the animation.
+  \setlength{\abovedisplayskip}{4pt}\setlength{\belowdisplayskip}{4pt}
+  \setlength{\abovedisplayshortskip}{2pt}\setlength{\belowdisplayshortskip}{2pt}
+  \small
+  In the homogeneous reference (virtual) half-space $\mbf{X}=(X_1,X_2)$, the
+  in-plane displacement $\mbf{U}=(U_1,U_2)$ obeys the Navier elastodynamic
+  equation
+  \begin{equation*}
+    \nabla_{\!X}\cdot\left(\mbf{C}:\nabla_{\!X}\mbf{U}\right)=\rho\,\mbf{U}_{tt},
+  \end{equation*}
+  A coordinate map $\mbf{x}=\Xi(\mbf{X})$, $\mbf{F}=\nabla_{\!X}\mbf{x}$,
+  $J=\det\mbf{F}$, and the gauge $\mbf{U}(\Xi(\mbf{X}))=\mbf{u}(\mbf{x})$ carry it
+  to
+  $\nabla_{\!x}\!\cdot(\Ceff:\nabla_{\!x}\mbf{u})=\rho^{\mathrm{eff}}\mbf{u}_{tt}$
+  with the \textbf{Brun--Guenneau--Movchan} push-forward:
+  \begin{equation*}
+    c^{\mathrm{eff}}_{ijkl}=J^{-1}\,C_{IjKl}\,F_{iI}\,F_{kK},
+    \qquad \rho^{\mathrm{eff}}=\rho\,J^{-1}.
+  \end{equation*}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{The obstruction}
+        \small The transformed tensor keeps the \emph{major} symmetry but
+        breaks the \emph{minor} ones,
+        \[
+          c^{\mathrm{eff}}_{ijkl}=c^{\mathrm{eff}}_{klij},
+          \qquad
+          c^{\mathrm{eff}}_{ijkl}\neq c^{\mathrm{eff}}_{jikl}.
+        \]
+        Hence the ideal cloak is a \textbf{polar (Cosserat)} medium with a
+        non-symmetric stress.
+      \end{block}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \centering
+      \animategraphics[width=\linewidth, autoplay, loop, poster=first]%
+        {20}{figures/morph_frames/frame-}{001}{180}\\[0.2em]
+      {\scriptsize The map $\Xi$ morphing the flat reference half-space
+        into the notched one.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -159,7 +213,7 @@
 % ------------------------------------------------------------
 %  SLIDE 4 -- Objectives / Contributions
 % ------------------------------------------------------------
-\begin{frame}{What we built}
+\begin{frame}{Elastic cloaking optimization formulation}
   \begin{block}{Objective}
     Cast carpet-cloak design as a \textbf{PDE-constrained optimisation} solved
     by a coordinate \textbf{neural field} through a \textbf{differentiable
@@ -184,40 +238,6 @@
         Best \emph{fabricable} design $\to$ \bignum{$\approx\!97\%$}{ of ideal}\\[0.3em]
         {\scriptsize First microstructured Rayleigh-wave cloak from a common material.}
       \end{beamercolorbox}
-    \end{column}
-  \end{columns}
-\end{frame}
-
-% ------------------------------------------------------------
-%  SLIDE 5 -- Transformation elasticity: the exact recipe
-% ------------------------------------------------------------
-\begin{frame}{Transformation elasticity: the exact cloak}
-  A coordinate map $\mbf{x}=\Xi(\mbf{X})$, $\mbf{F}=\nabla_{\!X}\mbf{x}$,
-  $J=\det\mbf{F}$, rewrites Navier's equation
-  $\nabla_{\!x}\!\cdot(\Ceff:\nabla_{\!x}\mbf{u})=\rho^{\mathrm{eff}}\mbf{u}_{tt}$
-  with the \textbf{Brun--Guenneau--Movchan} push-forward:
-  \begin{equation*}
-    c^{\mathrm{eff}}_{ijkl}=J^{-1}\,C_{IjKl}\,F_{iI}\,F_{kK},
-    \qquad \rho^{\mathrm{eff}}=\rho\,J^{-1}.
-  \end{equation*}
-  \begin{columns}[T]
-    \begin{column}{0.55\textwidth}
-      \begin{block}{The obstruction (rigid statement)}
-        \small The transformed tensor keeps the \emph{major} symmetry but
-        breaks the \emph{minor} ones,
-        \[
-          c^{\mathrm{eff}}_{ijkl}=c^{\mathrm{eff}}_{klij},
-          \qquad
-          c^{\mathrm{eff}}_{ijkl}\neq c^{\mathrm{eff}}_{jikl}.
-        \]
-        Hence the ideal cloak is a \textbf{polar (Cosserat)} medium with a
-        non-symmetric stress -- it lies \emph{outside} the class of ordinary
-        Cauchy materials.
-      \end{block}
-    \end{column}
-    \begin{column}{0.43\textwidth}
-      \takeaway{The exact cloak is a theorem, not a blueprint. Our job is the
-        \emph{best realisable approximation} inside the Cauchy class.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -258,7 +278,7 @@
 % ------------------------------------------------------------
 %  SLIDE 7 -- Reformulation as optimisation
 % ------------------------------------------------------------
-\begin{frame}{From a broken theorem to an optimisation problem}
+\begin{frame}{Elastic cloaking optimization formulation}
   \begin{columns}[T]
     \begin{column}{0.53\textwidth}
       \begin{block}{Design class: orthotropic Cauchy (4CM)}
@@ -444,9 +464,22 @@
 \end{frame}
 
 % ------------------------------------------------------------
+%  SLIDE 11b -- Results I: the cloak in motion (animated)
+% ------------------------------------------------------------
+\begin{frame}{Results I -- the cloak in motion}
+  \centering
+  \animategraphics[width=0.9\linewidth, autoplay, loop, controls, poster=first]%
+    {20}{figures/wave_frames/frame-}{001}{060}\\[0.4em]
+  {\scriptsize Vertical displacement $u_y$ at $f^\star=2.0$; the surface wave
+    passes the cloaked notch and re-forms downstream.}
+  \takeaway{The wavefront leaves the cloak intact -- no shadow, no reflected
+    front.}
+\end{frame}
+
+% ------------------------------------------------------------
 %  SLIDE 12 -- Results II: broadband
 % ------------------------------------------------------------
-\begin{frame}{Results II -- broadband: one design, a whole octave}
+\begin{frame}{Results II -- broadband: one design, many frequencies}
   \begin{columns}[T]
     \begin{column}{0.50\textwidth}
       \small
