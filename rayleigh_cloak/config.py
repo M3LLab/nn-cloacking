@@ -134,6 +134,16 @@ class CellConfig(BaseModel):
     # grids (esp. 1x1) where a cell's bbox footprint spills far outside the
     # triangular annulus into the bulk half-space.
     confine_to_cloak: bool = False
+    # When True, the cloak is decomposed by *region* rather than by cell-centre:
+    # every grid tile that contains at least one cloak quadrature point becomes an
+    # independent optimisable material, so the whole triangular annulus is covered
+    # and the inter-material boundaries lie exactly on the grid lines (e.g. 2x1 =
+    # split at x_mid into left/right halves). Unlike the centroid mask it neither
+    # under-covers the triangle (leaving parts as background) nor stair-steps the
+    # outer boundary. Implies confine_to_cloak=True (so out-of-annulus quadrature
+    # points still get background and the true triangle edge is preserved). The
+    # reported number of materials is the number of covered tiles, not n_x*n_y.
+    partition_cloak: bool = False
     # When True (requires n_C_params=6), the cell stiffness is parametrised as the
     # 6-param anisotropic **Cauchy** form [C11,C22,C66,C12,C16,C26] (symmetric
     # shear + normal-shear coupling) instead of the default block-diagonal
@@ -154,6 +164,11 @@ class CellConfig(BaseModel):
                 f"aniso_cauchy=True requires n_C_params=6 (the anisotropic-Cauchy "
                 f"flat6cauchy layout); got n_C_params={self.n_C_params}."
             )
+        # Region-partition needs the per-point annulus clip, otherwise tile
+        # material would spill outside the triangle (staircased boundary) and
+        # the coverage count would include tiles touching only the bulk.
+        if self.partition_cloak and not self.confine_to_cloak:
+            object.__setattr__(self, "confine_to_cloak", True)
         return self
 
 
@@ -297,9 +312,21 @@ class NeuralReparamConfig(BaseModel):
     kappa: float = 0.95            # |C12/sqrt(C11*C22)| bound (<1 => positive-definite)
     cap_anisotropy: bool = True    # bound C11/C22 in [1/R, R] (flat4 constrained path)
     anisotropy_ratio: float = 15.0  # R; ~ dataset C11/C22 p99 (12x) + margin
+    # Mirror-symmetry prior (requires constrained + cells.aniso_cauchy). Imposes
+    # the exact symmetry of the ideal triangular cloak: cells mirrored about the
+    # cloak centreline x_c share C11/C22/C66/C12 and rho, and carry equal-and-
+    # opposite C16/C26. Implemented by folding the MLP input about x_c and
+    # sign-flipping the two off-diagonal Cholesky channels — see
+    # ``neural_reparam.make_neural_reparam``. Halves the effective DOF.
+    mirror_x: bool = False
 
     @model_validator(mode="after")
     def _check_constrained_fields(self) -> "NeuralReparamConfig":
+        if self.mirror_x and not self.constrained:
+            raise ValueError(
+                "neural.mirror_x=True requires constrained=True (the prior is "
+                "implemented inside the constrained anisotropic-Cauchy decode)."
+            )
         if self.constrained:
             if not (0.0 < self.kappa < 1.0):
                 raise ValueError(

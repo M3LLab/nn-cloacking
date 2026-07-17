@@ -82,6 +82,26 @@ class CellDecomposition:
     def cloak_cell_indices(self) -> np.ndarray:
         return np.where(self.cloak_mask)[0]
 
+    # ── region-partition (coverage) mask ──────────────────────────────
+
+    def active_mask_from_qp(self, qp_to_cell) -> np.ndarray:
+        """Coverage mask: tiles containing ≥1 (in-cloak) quadrature point.
+
+        Given a ``qp_to_cell`` mapping (as produced by ``build_qp_mapping`` with
+        ``confine_to_cloak=True``, where out-of-annulus points carry the
+        sentinel ``n_cells``), return a ``(n_cells,)`` bool array that is True
+        for every tile actually referenced by a cloak quadrature point. This
+        replaces the centre-based ``cloak_mask`` so the *whole* triangular
+        annulus is covered by optimisable material and the inter-tile boundaries
+        fall on the grid lines (region partition), rather than the centroid test
+        which under-covers the triangle and stair-steps its boundary.
+        """
+        used = np.unique(np.asarray(qp_to_cell))
+        used = used[used < self.n_cells]  # drop the background sentinel
+        mask = np.zeros(self.n_cells, dtype=bool)
+        mask[used] = True
+        return mask
+
     # ── quadrature-point mapping ──────────────────────────────────────
 
     def _point_to_cell_index(self, x: np.ndarray) -> int:

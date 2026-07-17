@@ -338,6 +338,7 @@ $\mbf{u}(\mbf{x},t)=\operatorname{Re}\bigl[\mbf{u}(\mbf{x})\,e^{-\mathrm{i}\omeg
 which replaces $\mbf{u}_{tt}$ by $-\omega^2\mbf{u}$.
 
 \subsection{Transformation elasticity for the triangular carpet cloak}
+\label{subsec:triangular}
 
 The cloak follows the pinched-carpet construction
 of \citet{chatzopoulos2023}. With the free surface on $X_2=0$ and the
@@ -697,9 +698,21 @@ and density are optimised through the differentiable FEM at $f^\star=2.0$. The
 natural point of comparison is the closed-form arithmetic-mean symmetrisation
 of \citet{chatzopoulos2023}: the ideal polar tensor~\eqref{eq:Ceff} made
 minor-symmetric by averaging each broken pair, instantiated on the same mesh
-and solved with the same FEM. Both are single homogeneous Cauchy materials,
-so this is a like-for-like test of hand symmetrisation against gradient-based
-optimisation.
+and solved with the same FEM.
+
+It is worth being precise about what that baseline actually is, because it is
+richer than the $1\times1$ tile it is compared against. Symmetrisation
+\emph{averages} each broken pair of Sec.~\ref{subsec:triangular} to its mean
+rather than annihilating it, so the coupling entries $c_{11,12}$ and
+$c_{22,12}$ survive: the symmetrised medium retains normal--shear coupling and
+is a \emph{fully anisotropic} Cauchy material --- six free moduli
+$(C_{11},C_{22},C_{66},C_{12},C_{16},C_{26})$ and a density, which we label
+6CM --- rather than the orthotropic form~\eqref{eq:4cm}. Nor is it one
+material: as noted in Sec.~\ref{subsec:triangular}, $F_{21}$ merely changes
+sign across the centreline, so the ideal tensor~\eqref{eq:Ceff} and its
+symmetrisation alike consist of two mirror-image phases. The single 4CM tile
+therefore competes against symmetrisation from strictly \emph{less} material
+freedom: one orthotropic tensor against two anisotropic ones.
 
 Table~\ref{tab:single_vs_sym} reports the outcome. The symmetrised tensor
 recovers only $\eta=0.63$ and actually distorts the near field more than the
@@ -707,29 +720,75 @@ bare notch (the ideal-material minor-symmetry violation is large at
 $f^\star=2$). A single optimised orthotropic material instead reaches
 $\eta=0.86$ --- a substantial jump towards the ideal continuous polar cloak
 ($\eta=0.999$) obtained from just one degree of material freedom per phase,
-and clear evidence that optimising inside the Cauchy class outperforms
-symmetrisation. It is, however, still far from perfect:
+from a smaller material class and half the materials, and clear evidence that
+optimising inside the Cauchy class outperforms symmetrisation. It is, however,
+still far from perfect:
 one material most certainly cannot reproduce the cloaking of the ideal tensor.
 Figure~\ref{fig:single_vs_sym_sweep} confirms that the advantage is
 concentrated around the design frequency, as expected for a single-frequency
 optimisation.
 
+That the two halves of the ideal cloak are mirror images also pins down
+exactly what a second material must supply, and why one tile saturates near
+$\eta=0.86$ for structural rather than numerical reasons. Evaluating the two
+halves shows that the mirror acts \emph{only} on the coupling: symmetrised,
+both share $(C_{11},C_{22},C_{66},C_{12})=(648,293,56,403)\,$MPa and
+$\rho=2400\,$kg\,m$^{-3}$, and differ solely in
+$(C_{16},C_{26})=(\pm162,\pm110)\,$MPa. The orthotropic class~\eqref{eq:4cm}
+sets $C_{16}=C_{26}=0$ identically, so both ideal halves collapse onto the
+\emph{same} 4CM tensor: within 4CM a left--right split offers no freedom the
+ideal cloak actually uses, and one tile is already the best a 4CM design can
+do with such a split.
+
+Matching the symmetrisation baseline in both respects --- its own 6CM class,
+and one tile per half --- makes the comparison like-for-like and closes much
+of the remaining gap: two optimised 6CM tiles, one on each side of $x_c$,
+reach $\eta=0.947$ against symmetrisation's $0.634$ on the same mesh, source,
+loss and design frequency (Table~\ref{tab:single_vs_sym}). Given identical
+material freedom, gradient-based design thus recovers roughly two thirds of
+the gap that hand symmetrisation leaves. The optimiser also
+rediscovers the cloak's mirror structure unprompted: from an isotropic seed it
+converges to tensors that are mirror images to within $3\%$, and constraining
+the pair to be exactly mirror-symmetric costs only $0.002$ in $\eta$
+($0.944$ versus $0.947$) at half the design variables. The small residual
+asymmetry reflects the one-sided incident wave, which breaks the symmetry of
+the scattering problem that the geometry itself possesses.
+
+Two caveats bound this result. First, $\eta=0.947$ is a \emph{continuum-level}
+statement: the optimised tensors are genuinely non-orthotropic --- no rotation
+brings both $C_{16}$ and $C_{26}$ to zero (the residual coupling remains
+$10$--$34\%$ of $\sqrt{C_{11}C_{66}}$) --- so they cannot be realised by the
+$D_2$-symmetric square cells of Sec.~\ref{sec:micro}, whose edge mirrors force
+$C_{16}=C_{26}=0$, nor by rotating such cells. This limitation is shared by
+the symmetrisation baseline, which is 6CM for the same reason, and it is what
+motivates restricting the remainder of the paper to the 4CM class that the
+microstructure catalogue can actually build. Second, the optimum is not the
+transformation cloak: it stiffens the shear modulus $8\times$ and the density
+$1.7\times$ relative to the ideal tensor while halving $C_{12}$, consistent
+with the symmetrised ideal itself reaching only $\eta=0.63$.
+
 \begin{table}[htbp]
 \centering
-\caption{Single-frequency cloak ratio $\eta$ at $f^\star=2.0$ for a single
-homogeneous realisable material. The optimised orthotropic tile outperforms
-the closed-form symmetrisation of \citet{chatzopoulos2023}, yet neither
-attains the ideal continuous polar cloak.}
+\caption{Single-frequency cloak ratio $\eta$ at $f^\star=2.0$ for homogeneous
+Cauchy materials filling the cloak. 4CM is the orthotropic
+class~\eqref{eq:4cm}; 6CM additionally admits the normal--shear coupling
+$(C_{16},C_{26})$. A single optimised 4CM tile beats the symmetrisation of
+\citet{chatzopoulos2023} from a smaller class and half the materials; matching
+symmetrisation's own class and material count (two 6CM tiles, one per half of
+the cloak) reaches $\eta=0.947$. All optimised rows share the mesh, source,
+loss and design frequency. Neither 6CM row is realisable with the $D_2$ square
+cells of Sec.~\ref{sec:micro} (see text).}
 \label{tab:single_vs_sym}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lc@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccc@{}}
 \toprule
-Configuration & $\eta$ \\
+Configuration & Materials & Class & $\eta$ \\
 \midrule
-Obstacle (no cloak)                                   & $0.37$  \\
-Symmetrised ideal (Chatzopoulos)        & $0.634$ \\
-Single optimised material ($1\times1$, 4CM)                 & $0.857$ \\
+Obstacle (no cloak)                        & --- & ---            & $0.37$  \\
+Symmetrised ideal (Chatzopoulos)           & 2   & 6CM            & $0.634$ \\
+Single optimised material ($1\times1$)     & 1   & 4CM            & $0.857$ \\
+Optimised left/right pair ($2\times1$)     & 2   & 6CM            & $\mathbf{0.947}$ \\
 \midrule
-Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & $0.999$ \\
+Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & 2 & polar & $0.999$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
