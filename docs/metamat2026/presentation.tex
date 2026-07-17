@@ -213,7 +213,7 @@
 % ------------------------------------------------------------
 %  SLIDE 4 -- Objectives / Contributions
 % ------------------------------------------------------------
-\begin{frame}{Elastic cloaking optimization formulation}
+\begin{frame}{ML methods for realisable cloaks}
   \begin{block}{Objective}
     Cast carpet-cloak design as a \textbf{PDE-constrained optimisation} solved
     by a coordinate \textbf{neural field} through a \textbf{differentiable
@@ -243,37 +243,70 @@
 \end{frame}
 
 % ------------------------------------------------------------
-%  SLIDE 6 -- The triangular carpet cloak
+%  SLIDE 5 -- What is a neural field?
 % ------------------------------------------------------------
-\begin{frame}{Why triangular? Two phases instead of a singularity}
+\begin{frame}{What is a neural field?}
   \begin{columns}[T]
-    \begin{column}{0.52\textwidth}
+    \begin{column}{0.44\textwidth}
       \small
-      Pinched-carpet shear map (Chatzopoulos 2023). Its gradient is
-      \emph{piecewise constant}:
-      \begin{equation*}
-        \mbf{F}=\begin{bmatrix}1&0\\ F_{21}&F_{22}\end{bmatrix},\quad
-        F_{21}=\operatorname{sign}(X_1)\tfrac{a}{c},\quad
-        F_{22}=\tfrac{b-a}{b}=J,
-      \end{equation*}
-      so the effective material is \textbf{uniform in each half} of the cloak
-      and $\rho^{\mathrm{eff}}=\tfrac{b}{b-a}\rho$ is constant.
-      \begin{itemize}
-        \item No inner-boundary singularity (unlike radial blow-up cloaks).
-        \item Ideal cloak $=$ just \textbf{two} mirror-image phases\ldots
-        \item \ldots but \emph{three} minor-symmetry pairs are broken -- exactly
-              what symmetrisation averages away by hand.
+      A small MLP that maps a \textbf{coordinate} to a \textbf{field value},
+      \[
+        \Phi_\theta:(x,y)\mapsto \text{field},
+      \]
+      trained until it \emph{is} the field. The weights $\theta$, not a pixel
+      grid, are the degrees of freedom.
+      \begin{itemize}\footnotesize
+        \item \textbf{Resolution-free}: query anywhere, e.g.\ at FEM quadrature points.
+        \item \textbf{Compact}: $\mcl{O}(10^3)$ weights for a whole material field.
+        \item \textbf{Differentiable}: $\partial(\text{field})/\partial\theta$ in closed form.
+        \item \textbf{Smooth by construction}: the architecture, not a penalty,
+              sets the bandwidth.
       \end{itemize}
     \end{column}
-    \begin{column}{0.46\textwidth}
+    \begin{column}{0.55\textwidth}
       \centering
-      % FIGURE: triangular-cell-decomposition.png
-      \includegraphics[width=0.92\linewidth]{triangular-cell-decomposition.png}\\
-      {\scriptsize Cartesian $14\times10$ cell decomposition; only 46 cells fall
-      inside the cloak (the active design variables).}
+      \includegraphics[width=\linewidth]{figures/siren.jpg}\\
+      {\scriptsize Same target, same budget, different activation/encoding
+      (Sitzmann et al., 2020). All fit the image (top); only some reproduce its
+      \textbf{gradients} and \textbf{Laplacian} -- plain ReLU has none.}
     \end{column}
   \end{columns}
+  % \takeaway{The architecture picks the function space. We use a $\tanh$ MLP with
+  %   Fourier features: smooth enough for a wave solver, rich enough to shape a cloak.}
 \end{frame}
+
+% ------------------------------------------------------------
+%  SLIDE 6 -- The triangular carpet cloak
+% ------------------------------------------------------------
+% \begin{frame}{Why triangular? Two phases instead of a singularity}
+%   \begin{columns}[T]
+%     \begin{column}{0.52\textwidth}
+%       \small
+%       Pinched-carpet shear map (Chatzopoulos 2023). Its gradient is
+%       \emph{piecewise constant}:
+%       \begin{equation*}
+%         \mbf{F}=\begin{bmatrix}1&0\\ F_{21}&F_{22}\end{bmatrix},\quad
+%         F_{21}=\operatorname{sign}(X_1)\tfrac{a}{c},\quad
+%         F_{22}=\tfrac{b-a}{b}=J,
+%       \end{equation*}
+%       so the effective material is \textbf{uniform in each half} of the cloak
+%       and $\rho^{\mathrm{eff}}=\tfrac{b}{b-a}\rho$ is constant.
+%       \begin{itemize}
+%         \item No inner-boundary singularity (unlike radial blow-up cloaks).
+%         \item Ideal cloak $=$ just \textbf{two} mirror-image phases\ldots
+%         \item \ldots but \emph{three} minor-symmetry pairs are broken -- exactly
+%               what symmetrisation averages away by hand.
+%       \end{itemize}
+%     \end{column}
+%     \begin{column}{0.46\textwidth}
+%       \centering
+%       % FIGURE: triangular-cell-decomposition.png
+%       \includegraphics[width=0.92\linewidth]{triangular-cell-decomposition.png}\\
+%       {\scriptsize Cartesian $14\times10$ cell decomposition; only 46 cells fall
+%       inside the cloak (the active design variables).}
+%     \end{column}
+%   \end{columns}
+% \end{frame}
 
 % ------------------------------------------------------------
 %  SLIDE 7 -- Reformulation as optimisation
@@ -304,12 +337,12 @@
   \end{columns}
   \vspace{0.2em}
   \begin{center}\small
-    Report card: the \textbf{cloak ratio}\quad
+    Metric: the \textbf{cloak ratio}\quad
     $\displaystyle \eta=\frac{\langle|\mbf{u}|\rangle}{\langle|\uref|\rangle}\to 1$
     \quad(perfect cloak).
   \end{center}
-  \takeaway{Magnitudes, not complex fields: a wave routed around the notch is
-    allowed to arrive with a benign phase lag.}
+  % \takeaway{Magnitudes, not complex fields: a wave routed around the notch is
+  %   allowed to arrive with a benign phase lag.}
 \end{frame}
 
 % ------------------------------------------------------------
