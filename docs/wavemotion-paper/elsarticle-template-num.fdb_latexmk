@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex elsarticle-template-num"] 1784109706.52168 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1784109713.05934 0
+["bibtex elsarticle-template-num"] 1784292365.23784 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1784292374.35825 0
   "./cas-refs.bib" 1783941667.40277 8717 fc910c7dda95cc37290ab0b5d6ca8b6d ""
   "./elsarticle-num-names.bst" 1783701782.28213 28896 ef8ea1833e4d69d9f60b6db23b4bea61 ""
-  "elsarticle-template-num.aux" 1784109712.73707 19631 5f8f36b7230ac04e15ee01922f89c9dc "pdflatex"
+  "elsarticle-template-num.aux" 1784292373.88143 20068 6b944aadb0c4220fd6aa77bb0b216f55 "pdflatex"
   (generated)
   "elsarticle-template-num.bbl"
   "elsarticle-template-num.blg"
   (rewritten before read)
-["pdflatex"] 1784109706.62615 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1784109713.0595 2
+["pdflatex"] 1784292365.39671 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1784292374.35849 2
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1136849721 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm" 1136768653 3584 2d666ecf6d466d8b007246bc2f94d9da ""
@@ -195,10 +195,10 @@
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1772288159 3636404 0d6b22a798b2c182d7f754d1f98c8969 ""
   "/usr/local/texlive/2025/texmf.cnf" 1772288092.0538 455 5b996dcaa0eb4ef14a83b026bc0a008c ""
   "bloch_dispersion.png" 0 -1 0 ""
-  "elsarticle-template-num.aux" 1784109712.73707 19631 5f8f36b7230ac04e15ee01922f89c9dc "pdflatex"
-  "elsarticle-template-num.bbl" 1784109706.62129 10916 453e28d66250da529c59a92b32127902 "bibtex elsarticle-template-num"
-  "elsarticle-template-num.spl" 1784109706.81405 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "elsarticle-template-num.tex" 1784109624.22568 66559 35458e4efc31e9a601c71322a2903cb5 ""
+  "elsarticle-template-num.aux" 1784292373.88143 20068 6b944aadb0c4220fd6aa77bb0b216f55 "pdflatex"
+  "elsarticle-template-num.bbl" 1784292365.3905 10916 453e28d66250da529c59a92b32127902 "bibtex elsarticle-template-num"
+  "elsarticle-template-num.spl" 1784292365.6654 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "elsarticle-template-num.tex" 1784292272.42036 70602 356684528f71c1a3cc279df2b1e56ce5 ""
   "elsarticle.cls" 1783701773.0841 45216 8d57180189bc20f55de1fd7b66d8c091 ""
   "figures/cloak_microstructure_diffusion.png" 1783875427.32856 64007 edc25636e54e69f69b2d72ce14904b05 ""
   "figures/cloak_microstructure_inverse.png" 1783875427.32927 65273 14d15c298f1fb30b950b8acd0a09946b ""

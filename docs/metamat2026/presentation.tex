@@ -79,7 +79,7 @@
 }
 
 \setAffiliations{%
-  \textsuperscript{a}Mathematical Modelling and Machine Learning, Institute of Mechanics NAS RA \\
+  \textsuperscript{a}Mathematical Modelling and Machine Learning Lab, Institute of Mechanics, Armenia \\
   \textsuperscript{b}Department of Physics, Imperial College London%
 }
 
@@ -109,20 +109,17 @@
   \begin{columns}[T]
     \begin{column}{0.56\textwidth}
       \setbeamerfont{enumerate item}{size=\normalsize}
-      \begin{enumerate}
-        \setlength{\itemsep}{0.55em}
-        \item {\normalsize The dream: a cloak for surface waves}
-        \item {\normalsize The catch: analytical cloaks are unbuildable}
-        \item {\normalsize Idea: \emph{let a network find the material}}
-        \item {\normalsize Four ML routes to a real structure}
-          \begin{itemize}\footnotesize
-            \item Neural-field material optimisation
-            \item Unit-cell inverse design
-            \item Guided-diffusion generation
-            \item Latent-space search
-          \end{itemize}
-        \item {\normalsize Results, and how much survives fabrication}
-      \end{enumerate}
+      \begin{block}{Challenge}
+        Cloak an arbitrary surface obstacle from Rayleigh waves.
+      \end{block}
+      \begin{block}{Current Gap}
+        No general solution has yet demonstrated ideal realizable carpet
+        cloaking.
+      \end{block}
+      \begin{block}{Result}
+        A cement-based proof of concept for single-frequency and broadband
+        cloaking.
+      \end{block}
     \end{column}
     \begin{column}{0.42\textwidth}
       \centering
@@ -245,7 +242,7 @@
 % ------------------------------------------------------------
 %  SLIDE 5 -- What is a neural field?
 % ------------------------------------------------------------
-\begin{frame}{What is a neural field?}
+\begin{frame}{Neural field}
   \begin{columns}[T]
     \begin{column}{0.44\textwidth}
       \small
@@ -394,70 +391,117 @@
 \end{frame}
 
 % ------------------------------------------------------------
-%  SLIDE 9 -- Method 1: neural-field material optimisation
+%  SLIDE 8b -- Assembly rule: chiral vs squared
 % ------------------------------------------------------------
-\begin{frame}{\ding{202} Method 1 -- Neural-field material optimisation}
+\begin{frame}{Design space: chiral vs squared cells}
   \begin{columns}[T]
-    \begin{column}{0.50\textwidth}
-      \small
-      Reparameterise the material field by a coordinate MLP
-      \[
-        \Phi_\theta:(x,y)\mapsto(\Cfcm(x,y),\,\rho(x,y)),
-      \]
-      applied as a \textbf{multiplicative residual} around a physical prior:
-      \[
-        \Cfcm=\Cfcm^{(0)}\odot\big(1+\epsilon\,\Phi^{(C)}_\theta\big).
-      \]
-      \begin{itemize}
-        \item $\tanh$ MLP, 4 layers, Fourier positional encoding.
-        \item Relative perturbation is scale-uniform across moduli.
-        \item Smoothness is \emph{built in} -- no neighbour penalty needed.
-      \end{itemize}
-    \end{column}
-    \begin{column}{0.49\textwidth}
+    \begin{column}{0.42\textwidth}
       \centering
-      % FIGURE: ml-pipeline.png  (the neural-field design pipeline schematic)
-      \includegraphics[width=\linewidth]{ml-pipeline.png}\\
-      {\scriptsize Coordinates $\to$ Fourier encoding $\to$ MLP $\to$
-      $(\Cfcm,\rho)$ $\to$ FEM $\to$ loss, differentiated back to $\theta$.}
+      {\small\textbf{Squared: mirror} ($D_4$)}\\[0.3em]
+      \begin{tikzpicture}[scale=0.62, line width=0.7pt]
+        \draw[ASTRAnavy] (-1.2,-1.2) rectangle (1.2,1.2);
+        \draw[ASTRAnavy!30] (0,-1.2) -- (0,1.2);
+        \draw[ASTRAnavy!30] (-1.2,0) -- (1.2,0);
+        % mirror lines
+        \draw[dashed, ASTRAorange, thick] (0,-1.5) -- (0,1.5);
+        \draw[dashed, ASTRAorange, thick] (-1.5,0) -- (1.5,0);
+        % double-headed reflection arrows across each mirror line
+        \draw[Latex-Latex, ASTRAorange, thick] (-0.75,0.6) -- (0.75,0.6);
+        \draw[Latex-Latex, ASTRAorange, thick] (-0.6,-0.75) -- (-0.6,0.75);
+        \node[font=\scriptsize, ASTRAnavy] at (-0.85,0.9) {Q};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering
+      {\small\textbf{Chiral: rotate} ($C_4$)}\\[0.3em]
+      \begin{tikzpicture}[scale=0.62, line width=0.7pt]
+        \draw[ASTRAnavy] (-1.2,-1.2) rectangle (1.2,1.2);
+        \draw[ASTRAnavy!30] (0,-1.2) -- (0,1.2);
+        \draw[ASTRAnavy!30] (-1.2,0) -- (1.2,0);
+        % clockwise 90-degree rotation arrows between quadrants
+        \draw[-Latex, ASTRAorange, thick] (-0.6,0.95) arc (135:45:0.85);
+        \draw[-Latex, ASTRAorange, thick] (0.95,0.6) arc (45:-45:0.85);
+        \draw[-Latex, ASTRAorange, thick] (0.6,-0.95) arc (-45:-135:0.85);
+        \draw[-Latex, ASTRAorange, thick] (-0.95,-0.6) arc (225:135:0.85);
+        \node[font=\scriptsize, ASTRAnavy] at (-0.6,0.6) {Q};
+        \node[font=\scriptsize, ASTRAorange] at (0.62,0.62) {$90^\circ$};
+      \end{tikzpicture}
     \end{column}
   \end{columns}
-  \takeaway{The network is the material. Design $=$ training its weights against
-    a wave-physics loss.}
+  \vspace{-0.4em}
+  \begin{center}
+    \includegraphics[width=0.45\linewidth]{figures/chiral_vs_squared_cells.png}\\
+    {\scriptsize Real $50\times50$ cells, the same quadrant Q both
+    ways~\cite{nakarmi2024}.}
+  \end{center}
 \end{frame}
 
-% ------------------------------------------------------------
-%  SLIDE 10 -- Method 1b: admissible-by-construction decoding
-% ------------------------------------------------------------
-\begin{frame}{\ding{202} Admissible \emph{by construction}: the decoding map}
-  \small
-  Raw outputs $\mbf{r}=(r_{11},r_{22},r_{66},r_{12})$ are decoded so every design
-  is a valid Cauchy tensor -- no penalty policing after the fact.
-  \begin{columns}[T]
-    \begin{column}{0.33\textwidth}
-      \begin{block}{Positivity}
-        \[ C_{ii}=C_{ii}^{(0)}e^{\epsilon r_{ii}} \]
-        Log-space $\Rightarrow C_{ii}>0$ for any real $r_{ii}$.
-      \end{block}
-    \end{column}
-    \begin{column}{0.33\textwidth}
-      \begin{block}{Bounded anisotropy}
-        \[ g_b=\tfrac12\log R\,\tanh\!\Big(\tfrac{g}{\frac12\log R}\Big) \]
-        confines $C_{11}/C_{22}\in[1/R,R]$, $R=30$.
-      \end{block}
-    \end{column}
-    \begin{column}{0.33\textwidth}
-      \begin{block}{PD coupling}
-        \[ C_{12}=\rho_c\sqrt{C_{11}C_{22}} \]
-        $\rho_c=\kappa\tanh(r_{12}{+}\phi_0)$, $\kappa=0.99$
-        $\Rightarrow\det\!>\!0$.
-      \end{block}
-    \end{column}
-  \end{columns}
-  \takeaway{A smooth, everywhere-differentiable surjection onto the set of
-    positive-definite, bounded-anisotropy tensors: the optimiser can never leave
-    the realisable class.}
-\end{frame}
+% % ------------------------------------------------------------
+% %  SLIDE 9 -- Method 1: neural-field material optimisation
+% % ------------------------------------------------------------
+% \begin{frame}{\ding{202} Method 1 -- Neural-field material optimisation}
+%   \begin{columns}[T]
+%     \begin{column}{0.50\textwidth}
+%       \small
+%       Reparameterise the material field by a coordinate MLP
+%       \[
+%         \Phi_\theta:(x,y)\mapsto(\Cfcm(x,y),\,\rho(x,y)),
+%       \]
+%       applied as a \textbf{multiplicative residual} around a physical prior:
+%       \[
+%         \Cfcm=\Cfcm^{(0)}\odot\big(1+\epsilon\,\Phi^{(C)}_\theta\big).
+%       \]
+%       \begin{itemize}
+%         \item $\tanh$ MLP, 4 layers, Fourier positional encoding.
+%         \item Relative perturbation is scale-uniform across moduli.
+%         \item Smoothness is \emph{built in} -- no neighbour penalty needed.
+%       \end{itemize}
+%     \end{column}
+%     \begin{column}{0.49\textwidth}
+%       \centering
+%       % FIGURE: ml-pipeline.png  (the neural-field design pipeline schematic)
+%       \includegraphics[width=\linewidth]{ml-pipeline.png}\\
+%       {\scriptsize Coordinates $\to$ Fourier encoding $\to$ MLP $\to$
+%       $(\Cfcm,\rho)$ $\to$ FEM $\to$ loss, differentiated back to $\theta$.}
+%     \end{column}
+%   \end{columns}
+%   \takeaway{The network is the material. Design $=$ training its weights against
+%     a wave-physics loss.}
+% \end{frame}
+
+% % ------------------------------------------------------------
+% %  SLIDE 10 -- Method 1b: admissible-by-construction decoding
+% %  MERGED into "From numbers to structures" slide below.
+% % ------------------------------------------------------------
+% \begin{frame}{\ding{202} Admissible \emph{by construction}: the decoding map}
+%   \small
+%   Raw outputs $\mbf{r}=(r_{11},r_{22},r_{66},r_{12})$ are decoded so every design
+%   is a valid Cauchy tensor -- no penalty policing after the fact.
+%   \begin{columns}[T]
+%     \begin{column}{0.33\textwidth}
+%       \begin{block}{Positivity}
+%         \[ C_{ii}=C_{ii}^{(0)}e^{\epsilon r_{ii}} \]
+%         Log-space $\Rightarrow C_{ii}>0$ for any real $r_{ii}$.
+%       \end{block}
+%     \end{column}
+%     \begin{column}{0.33\textwidth}
+%       \begin{block}{Bounded anisotropy}
+%         \[ g_b=\tfrac12\log R\,\tanh\!\Big(\tfrac{g}{\frac12\log R}\Big) \]
+%         confines $C_{11}/C_{22}\in[1/R,R]$, $R=30$.
+%       \end{block}
+%     \end{column}
+%     \begin{column}{0.33\textwidth}
+%       \begin{block}{PD coupling}
+%         \[ C_{12}=\rho_c\sqrt{C_{11}C_{22}} \]
+%         $\rho_c=\kappa\tanh(r_{12}{+}\phi_0)$, $\kappa=0.99$
+%         $\Rightarrow\det\!>\!0$.
+%       \end{block}
+%     \end{column}
+%   \end{columns}
+%   \takeaway{A smooth, everywhere-differentiable surjection onto the set of
+%     positive-definite, bounded-anisotropy tensors: the optimiser can never leave
+%     the realisable class.}
+% \end{frame}
 
 % ------------------------------------------------------------
 %  SLIDE 11 -- Results I: single frequency
@@ -467,33 +511,37 @@
     \begin{column}{0.44\textwidth}
       \centering\scriptsize
       \captionof*{table}{Cloak ratio $\eta$ at $f^\star=2.0$}
-      \begin{tabular}{@{}lc@{}}
+      \begin{tabular}{@{}lcc@{}}
         \toprule
-        Configuration & $\eta$ \\
+        Configuration & Class & $\eta$ \\
         \midrule
-        Obstacle (no cloak)            & $0.37$ \\
-        Symmetrised ideal (Chatz.\ 2023) & $0.63$ \\
-        \textbf{Single optimised 4CM}  & $\mathbf{0.86}$ \\
-        $2\times2$ (four materials)    & $0.96$ \\
-        \textbf{$14\times10$ grid (46 cells)} & $\mathbf{0.99}$ \\
+        Obstacle (no cloak)                & ---   & $0.37$  \\
+        Symmetrised ideal ($2\times1$) - Chatz.\ 2023   & 6CM   & $0.634$ \\
+        Single optimised ($1\times1$) & 4CM & $\mathbf{0.857}$ \\
+        \textbf{Optimised L/R pair ($2\times1$)}    & 6CM   & $0.947$ \\
+        % $2\times2$ (four materials)        & 4CM   & $0.962$ \\
         \midrule
-        Ideal continuous polar $\Ceff$ & $0.999$ \\
+        Ideal continuous polar $\Ceff$     & polar & $0.999$ \\
         \bottomrule
       \end{tabular}
       \vspace{0.4em}
-      \par{\scriptsize Depth beats width: subdividing in depth helps far more
+      \par{\scriptsize Depth beats width: $1\times2$ reaches $0.92$ while
+      $2\times1$ drops to $0.78$ -- subdividing in depth helps far more
       than along propagation.}
     \end{column}
     \begin{column}{0.55\textwidth}
       \centering
-      % FIGURE: single_freq_14x10_re_mag.png  (ref / notch / ideal / optimised)
-      \includegraphics[width=\linewidth]{single_freq_14x10_re_mag.png}\\
-      {\scriptsize Top$\to$bottom: reference, uncloaked notch (shadow!),
-      ideal polar cloak, optimised $14\times10$ cloak ($\eta=0.99$).}
+      % FIGURES: reference / ideal polar / optimised 14x10  (|Re(u)| at f*=2.0)
+      \includegraphics[width=\linewidth]{figures/field_reference_re_mag.png}\\[0.2em]
+      % \includegraphics[width=\linewidth]{figures/field_ideal_cloak_re_mag.png}\\[0.2em]
+      \includegraphics[width=\linewidth]{figures/field_cloaked_re_mag.png}\\[0.2em]
+      {\scriptsize Top$\to$bottom: reference (no obstacle), ideal polar cloak,
+      optimised $14\times10$ cloak ($\eta=0.99$).}
     \end{column}
   \end{columns}
-  \takeaway{A single realisable material jumps $0.63\!\to\!0.86$; 46 cells reach
-    $0.99$ -- essentially closing the gap to the ideal polar cloak.}
+  \takeaway{A single 4CM material jumps $0.634\!\to\!0.857$ from \emph{less}
+    material than symmetrisation; matching its 6CM class ($2\times1$) reaches
+    $0.947$, and 46 cells reach $0.990$ -- closing the gap to the ideal polar cloak.}
 \end{frame}
 
 % ------------------------------------------------------------
@@ -532,7 +580,8 @@
     \begin{column}{0.49\textwidth}
       \centering
       % FIGURE: multifreq_sweep.png
-      \includegraphics[width=\linewidth]{multifreq_sweep.png}\\
+      \includegraphics[width=\linewidth]{frequency_sweep_vis_NF.png}\\
+      % \includegraphics[width=\linewidth]{multifreq_sweep.png}\\
       {\scriptsize $\eta(f)$: broadband design (blue) holds $\approx0.96$ across
       the shaded training band; degrades gracefully outside it.}
     \end{column}
@@ -544,41 +593,50 @@
 % ------------------------------------------------------------
 %  SLIDE 13 -- Bridge: from tensors to structures
 % ------------------------------------------------------------
-\begin{frame}{From numbers to structures: the realisability problem}
-  \begin{block}{The gap}
-    \small Optimised cells carry a homogenised $(\Cfcm,\rho)$ that need not
-    correspond to any manufacturable object. We must \emph{realise} each cell as
-    a real two-phase (solid/void) microstructure.
-  \end{block}
+\begin{frame}{Admissible \emph{by construction}: the decoding map}
+  \small
+  Raw outputs $\mbf{r}=(r_{11},r_{22},r_{66},r_{12})$ are decoded so every design
+  is a valid Cauchy tensor. Three constraints are \emph{engraved into decoding}
+  (hard, always satisfied); realisability enters as a soft, dataset-based prior.
   \begin{columns}[T]
-    \begin{column}{0.60\textwidth}
-      \begin{enumerate}\footnotesize
-        \item[\ding{202}] \textbf{Dataset:} $N\!\sim\!10^{6}$ binary
-              $50\times50$ cells (cellular-automaton growth).
-        \item[\ding{203}] \textbf{Homogenise:} periodic FEM $\to(\Cfcm,\rho_{\mathrm{eff}})$;
-              $D_2$ symmetry $\Rightarrow$ exactly the 4CM form.
-        \item[\ding{204}] \textbf{Prior:} fit a GMM; keep a log-density super-level
-              set as the realisable manifold $\mcl{M}$.
-        \item[\ding{205}] \textbf{Constrain:} add the manifold penalty during
-              optimisation.
-      \end{enumerate}
+    \begin{column}{0.33\textwidth}
+      \begin{block}{Positivity}
+        \[ C_{ii}=C_{ii}^{(0)}e^{\epsilon r_{ii}} \]
+        Log-space $\Rightarrow C_{ii}>0$ for any real $r_{ii}$.
+      \end{block}
     \end{column}
-    \begin{column}{0.39\textwidth}
-      \begin{block}{Manifold penalty}
-        \small
-        \[
-          \mcl{L}_{\mathrm{GMM}}=\sum_c\max\!\big(0,\ \tau-\log p_{\mathrm{GMM}}(\Cfcm^{c},\rho_c)\big)
-        \]
-        pulls every cell into $\mcl{M}$ without pinning it to one catalogue entry.
+    \begin{column}{0.33\textwidth}
+      \begin{block}{Bounded anisotropy}
+        \[ g_b=\tfrac12\log R\,\tanh\!\Big(\tfrac{g}{\frac12\log R}\Big) \]
+        confines $C_{11}/C_{22}\in[1/R,R]$, $R=30$.
+      \end{block}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \begin{block}{PD coupling}
+        \[ C_{12}=\rho_c\sqrt{C_{11}C_{22}} \]
+        $\rho_c=\kappa\tanh(r_{12}{+}\phi_0)$, $\kappa=0.99$
+        $\Rightarrow\det\!>\!0$.
       \end{block}
     \end{column}
   \end{columns}
+  \vspace{0.4em}
+  \begin{block}{Realisability prior (soft, dataset-based)}
+    \small
+    A homogenised $(\Cfcm,\rho)$ need not correspond to a manufacturable object.
+    Fit a GMM to $N\!\sim\!10^{6}$ homogenised binary $50\times50$ cells and add a
+    log-density penalty
+    \[
+      \mcl{L}_{\mathrm{GMM}}=\sum_c\max\!\big(0,\ \tau-\log p_{\mathrm{GMM}}(\Cfcm^{c},\rho_c)\big),
+    \]
+    pulling every cell toward the realisable manifold $\mcl{M}$ without pinning it
+    to one catalogue entry.
+  \end{block}
 \end{frame}
 
 % ------------------------------------------------------------
-%  SLIDE 14 -- Method 2: unit-cell inverse design
+%  SLIDE 14 -- Method 1: unit-cell inverse design
 % ------------------------------------------------------------
-\begin{frame}{\ding{203} Method 2 -- Unit-cell inverse design (neural field)}
+\begin{frame}{Method 1 -- Unit-cell inverse design (neural field)}
   \begin{columns}[T]
     \begin{column}{0.54\textwidth}
       \small
@@ -607,9 +665,9 @@
 \end{frame}
 
 % ------------------------------------------------------------
-%  SLIDE 15 -- Method 3: guided diffusion
+%  SLIDE 15 -- Method 2: guided diffusion
 % ------------------------------------------------------------
-\begin{frame}{\ding{204} Method 3 -- Guided-diffusion generation}
+\begin{frame}{ Method 2 -- Guided-diffusion generation}
   \begin{columns}[T]
     \begin{column}{0.54\textwidth}
       \small
@@ -643,36 +701,36 @@
 % ------------------------------------------------------------
 %  SLIDE 16 -- Method 4: latent-space search
 % ------------------------------------------------------------
-\begin{frame}{\ding{205} Method 4 -- Search in a learned latent space}
-  \begin{columns}[T]
-    \begin{column}{0.53\textwidth}
-      \small
-      Direct pixel optimisation is ill-conditioned ($\sim\!10^4$ DoFs, bad minima).
-      Train an \textbf{autoencoder} on $(C,\rho,f_\star,\mcl{L})$ with a
-      \emph{frequency-separated} latent
-      \[
-        z = z_{\mathrm{sh}} + z_f(f_\star),
-      \]
-      (geometry vs.\ per-frequency offset), a performance head, and a
-      within-frequency contrastive ranking on $z_{\mathrm{sh}}$.
-      Then \textbf{freeze} the AE and optimise the \emph{code} $z$:
-      \[
-        \min_z\ \alpha\max_i\mcl{L}(f_i;z)+(1-\alpha)\tfrac1N\textstyle\sum_i\mcl{L}(f_i;z),
-        \ \ \alpha:1\!\to\!0.
-      \]
-    \end{column}
-    \begin{column}{0.46\textwidth}
-      \centering
-      % FIGURE: material_field_AE.png  (AE-decoded C,rho field)
-      \includegraphics[width=\linewidth]{material_field_AE.png}\\
-      {\scriptsize AE latent decodes to structured, \emph{manufacturable} motifs.
-      Cf.\ \texttt{frequency\_sweep\_vis.png}: AE $\eta\!\approx\!0.965$,
-      neural-field $\approx\!0.985$.}
-    \end{column}
-  \end{columns}
-  \takeaway{The latent search inherits the training distribution's manufacturable
-    priors -- smoother layouts, fewer iterations than raw topology optimisation.}
-\end{frame}
+% \begin{frame}{Method 4 -- Search in a learned latent space}
+%   \begin{columns}[T]
+%     \begin{column}{0.53\textwidth}
+%       \small
+%       Direct pixel optimisation is ill-conditioned ($\sim\!10^4$ DoFs, bad minima).
+%       Train an \textbf{autoencoder} on $(C,\rho,f_\star,\mcl{L})$ with a
+%       \emph{frequency-separated} latent
+%       \[
+%         z = z_{\mathrm{sh}} + z_f(f_\star),
+%       \]
+%       (geometry vs.\ per-frequency offset), a performance head, and a
+%       within-frequency contrastive ranking on $z_{\mathrm{sh}}$.
+%       Then \textbf{freeze} the AE and optimise the \emph{code} $z$:
+%       \[
+%         \min_z\ \alpha\max_i\mcl{L}(f_i;z)+(1-\alpha)\tfrac1N\textstyle\sum_i\mcl{L}(f_i;z),
+%         \ \ \alpha:1\!\to\!0.
+%       \]
+%     \end{column}
+%     \begin{column}{0.46\textwidth}
+%       \centering
+%       % FIGURE: material_field_AE.png  (AE-decoded C,rho field)
+%       \includegraphics[width=\linewidth]{material_field_AE.png}\\
+%       {\scriptsize AE latent decodes to structured, \emph{manufacturable} motifs.
+%       Cf.\ \texttt{frequency\_sweep\_vis.png}: AE $\eta\!\approx\!0.965$,
+%       neural-field $\approx\!0.985$.}
+%     \end{column}
+%   \end{columns}
+%   \takeaway{The latent search inherits the training distribution's manufacturable
+%     priors -- smoother layouts, fewer iterations than raw topology optimisation.}
+% \end{frame}
 
 % ------------------------------------------------------------
 %  SLIDE 17 -- Results III: microstructure realisation
@@ -763,8 +821,6 @@
     \bibitem{xu2020jaxfem} Xu et al.\ (2020).
       \textit{JAX-FEM: a differentiable finite-element solver.}
   \end{thebibliography}
-  \par\vspace{0.3em}{\scriptsize\itshape (Placeholder entries -- replace with the
-  paper's \texttt{cas-refs.bib} for the final deck.)}
 \end{frame}
 
 % ------------------------------------------------------------
