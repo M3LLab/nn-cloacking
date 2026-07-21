@@ -105,7 +105,7 @@
 % ------------------------------------------------------------
 %  SLIDE 2 -- Outline
 % ------------------------------------------------------------
-\begin{frame}{Outline}
+\begin{frame}{Problem}
   \begin{columns}[T]
     \begin{column}{0.56\textwidth}
       \setbeamerfont{enumerate item}{size=\normalsize}
@@ -135,7 +135,7 @@
 % ------------------------------------------------------------
 \begin{frame}{Hiding from a surface wave}
   \begin{columns}[T]
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.34\textwidth}
       \begin{block}{The goal}
         \begin{itemize}
           \item A \textbf{Rayleigh wave} rolls along the free surface of a
@@ -143,19 +143,18 @@
                 sensibly affects the displacement field beyond the defect.
           \item A \textbf{carpet cloak} is a coating that makes the surface
                 wave behave as if the inclusion were not there.
-          \item Applications: seismic protection, surface-acoustic-wave
-                devices, non-destructive testing.
+          % \item Applications: seismic protection, surface-acoustic-wave
+          %       devices, non-destructive testing.
         \end{itemize}
       \end{block}
-      \takeaway{We want a coating, buildable from \emph{ordinary materials},
-        that restores the surface wavefield beyond the defect.}
+      % \takeaway{We want a coating, buildable from \emph{ordinary materials},
+      %   that restores the surface wavefield beyond the defect.}
     \end{column}
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.66\textwidth}
       \centering
       % FIGURE: problem-setup.png  (domain + PML + point source + triangular cloak)
       \includegraphics[width=\linewidth]{problem-setup.png}\\
-      {\scriptsize Half-space, PML boundaries, a time-harmonic point source,
-      and the triangular cloak over the inclusion.}
+      {\scriptsize System setup: Half-space with PML, point source, and cloak.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -174,6 +173,10 @@
   \begin{equation*}
     \nabla_{\!X}\cdot\left(\mbf{C}:\nabla_{\!X}\mbf{U}\right)=\rho\,\mbf{U}_{tt},
   \end{equation*}
+  for a time-harmonic wave $\mbf{U}(\mbf{X},t)=\mbf{U}(\mbf{X})\,e^{i\omega t}$. 
+  % \begin{equation*}
+  %   \nabla_{\!X}\cdot\left(\mbf{C}:\nabla_{\!X}\mbf{U}\right)=-\rho\,\omega^{2}\,\mbf{U}.
+  % \end{equation*}
   A coordinate map $\mbf{x}=\Xi(\mbf{X})$, $\mbf{F}=\nabla_{\!X}\mbf{x}$,
   $J=\det\mbf{F}$, and the gauge $\mbf{U}(\Xi(\mbf{X}))=\mbf{u}(\mbf{x})$ carry it
   to
@@ -207,10 +210,12 @@
   \end{columns}
 \end{frame}
 
+
+
 % ------------------------------------------------------------
 %  SLIDE 4 -- Objectives / Contributions
 % ------------------------------------------------------------
-\begin{frame}{ML methods for realisable cloaks}
+\begin{frame}{ML methods for realisable symmetric cloaks}
   \begin{block}{Objective}
     Cast carpet-cloak design as a \textbf{PDE-constrained optimisation} solved
     by a coordinate \textbf{neural field} through a \textbf{differentiable
@@ -239,6 +244,34 @@
   \end{columns}
 \end{frame}
 
+
+% ------------------------------------------------------------
+%  SLIDE 6 -- Comparison
+% ------------------------------------------------------------
+
+\begin{frame}{Neural field}
+  \begin{columns}[T]
+    \begin{column}{0.66\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{figures/triangle.jpg}\\[0.4em]
+      \includegraphics[width=\linewidth]{figures/triangle-bottom.jpg}\\[0.6em]
+      {\scriptsize A pixel grid stores one value per unit cell; the neural field
+      $f_\phi(x,y)$ stores the whole material as network weights --- resolution-free
+      and smooth by construction.}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \begin{itemize}\footnotesize
+        \item \textbf{Resolution-free}: query anywhere, e.g.\ at FEM quadrature points.
+        \item \textbf{Compact}: $\mcl{O}(10^3)$ weights for a whole material field.
+        \item \textbf{Differentiable}: $\partial(\text{field})/\partial\theta$ in closed form.
+        \item \textbf{Smooth by construction}: the architecture, not a penalty,
+              sets the bandwidth.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+
 % ------------------------------------------------------------
 %  SLIDE 5 -- What is a neural field?
 % ------------------------------------------------------------
@@ -252,25 +285,21 @@
       \]
       trained until it \emph{is} the field. The weights $\theta$, not a pixel
       grid, are the degrees of freedom.
-      \begin{itemize}\footnotesize
-        \item \textbf{Resolution-free}: query anywhere, e.g.\ at FEM quadrature points.
-        \item \textbf{Compact}: $\mcl{O}(10^3)$ weights for a whole material field.
-        \item \textbf{Differentiable}: $\partial(\text{field})/\partial\theta$ in closed form.
-        \item \textbf{Smooth by construction}: the architecture, not a penalty,
-              sets the bandwidth.
-      \end{itemize}
     \end{column}
     \begin{column}{0.55\textwidth}
       \centering
       \includegraphics[width=\linewidth]{figures/siren.jpg}\\
       {\scriptsize Same target, same budget, different activation/encoding
-      (Sitzmann et al., 2020). All fit the image (top); only some reproduce its
-      \textbf{gradients} and \textbf{Laplacian} -- plain ReLU has none.}
+      (Sitzmann et al., 2020). }
     \end{column}
   \end{columns}
   % \takeaway{The architecture picks the function space. We use a $\tanh$ MLP with
   %   Fourier features: smooth enough for a wave solver, rich enough to shape a cloak.}
 \end{frame}
+
+
+% 
+
 
 % ------------------------------------------------------------
 %  SLIDE 6 -- The triangular carpet cloak
@@ -332,11 +361,12 @@
       \end{block}
     \end{column}
   \end{columns}
-  \vspace{0.2em}
-  \begin{center}\small
-    Metric: the \textbf{cloak ratio}\quad
-    $\displaystyle \eta=\frac{\langle|\mbf{u}|\rangle}{\langle|\uref|\rangle}\to 1$
-    \quad(perfect cloak).
+  \vspace{0.1em}
+  \begin{center}
+    \includegraphics[width=0.82\linewidth]{figures/field_eval_strip.png}\\[0.1em]
+    {\scriptsize Displacement magnitude with the near-surface strip $\mcl{B}$
+      (depth $0.5$, downstream/beyond the cloak notch) where the objective is
+      evaluated.}
   \end{center}
   % \takeaway{Magnitudes, not complex fields: a wave routed around the notch is
   %   allowed to arrive with a benign phase lag.}
@@ -387,52 +417,6 @@
       \draw[->,thick,dashed,ASTRAorange] (loss.south) to[out=-90,in=-90]
             node[below,midway]{adjoint gradient $\partial\mcl{L}/\partial\theta$} (nf.south);
     \end{tikzpicture}
-  \end{center}
-\end{frame}
-
-% ------------------------------------------------------------
-%  SLIDE 8b -- Assembly rule: chiral vs squared
-% ------------------------------------------------------------
-\begin{frame}{Design space: chiral vs squared cells}
-  \begin{columns}[T]
-    \begin{column}{0.42\textwidth}
-      \centering
-      {\small\textbf{Squared: mirror} ($D_4$)}\\[0.3em]
-      \begin{tikzpicture}[scale=0.62, line width=0.7pt]
-        \draw[ASTRAnavy] (-1.2,-1.2) rectangle (1.2,1.2);
-        \draw[ASTRAnavy!30] (0,-1.2) -- (0,1.2);
-        \draw[ASTRAnavy!30] (-1.2,0) -- (1.2,0);
-        % mirror lines
-        \draw[dashed, ASTRAorange, thick] (0,-1.5) -- (0,1.5);
-        \draw[dashed, ASTRAorange, thick] (-1.5,0) -- (1.5,0);
-        % double-headed reflection arrows across each mirror line
-        \draw[Latex-Latex, ASTRAorange, thick] (-0.75,0.6) -- (0.75,0.6);
-        \draw[Latex-Latex, ASTRAorange, thick] (-0.6,-0.75) -- (-0.6,0.75);
-        \node[font=\scriptsize, ASTRAnavy] at (-0.85,0.9) {Q};
-      \end{tikzpicture}
-    \end{column}
-    \begin{column}{0.42\textwidth}
-      \centering
-      {\small\textbf{Chiral: rotate} ($C_4$)}\\[0.3em]
-      \begin{tikzpicture}[scale=0.62, line width=0.7pt]
-        \draw[ASTRAnavy] (-1.2,-1.2) rectangle (1.2,1.2);
-        \draw[ASTRAnavy!30] (0,-1.2) -- (0,1.2);
-        \draw[ASTRAnavy!30] (-1.2,0) -- (1.2,0);
-        % clockwise 90-degree rotation arrows between quadrants
-        \draw[-Latex, ASTRAorange, thick] (-0.6,0.95) arc (135:45:0.85);
-        \draw[-Latex, ASTRAorange, thick] (0.95,0.6) arc (45:-45:0.85);
-        \draw[-Latex, ASTRAorange, thick] (0.6,-0.95) arc (-45:-135:0.85);
-        \draw[-Latex, ASTRAorange, thick] (-0.95,-0.6) arc (225:135:0.85);
-        \node[font=\scriptsize, ASTRAnavy] at (-0.6,0.6) {Q};
-        \node[font=\scriptsize, ASTRAorange] at (0.62,0.62) {$90^\circ$};
-      \end{tikzpicture}
-    \end{column}
-  \end{columns}
-  \vspace{-0.4em}
-  \begin{center}
-    \includegraphics[width=0.45\linewidth]{figures/chiral_vs_squared_cells.png}\\
-    {\scriptsize Real $50\times50$ cells, the same quadrant Q both
-    ways~\cite{nakarmi2024}.}
   \end{center}
 \end{frame}
 
@@ -510,7 +494,10 @@
   \begin{columns}[T]
     \begin{column}{0.44\textwidth}
       \centering\scriptsize
-      \captionof*{table}{Cloak ratio $\eta$ at $f^\star=2.0$}
+      % \captionof*{table}{Cloak ratio $\eta$ at $f^\star=2.0$}
+
+      \vspace{1.0em}
+
       \begin{tabular}{@{}lcc@{}}
         \toprule
         Configuration & Class & $\eta$ \\
@@ -524,10 +511,20 @@
         Ideal continuous polar $\Ceff$     & polar & $0.999$ \\
         \bottomrule
       \end{tabular}
-      \vspace{0.4em}
-      \par{\scriptsize Depth beats width: $1\times2$ reaches $0.92$ while
-      $2\times1$ drops to $0.78$ -- subdividing in depth helps far more
-      than along propagation.}
+      % \vspace{0.4em}
+      % \par{\scriptsize Depth beats width: $1\times2$ reaches $0.92$ while
+      % $2\times1$ drops to $0.78$ -- subdividing in depth helps far more
+      % than along propagation.}
+
+    \vspace{2.5em}
+
+    \begin{center}\small
+      Metric: the \textbf{cloak ratio}\quad
+      $\displaystyle \eta=\frac{\langle|\mbf{u}|\rangle}{\langle|\uref|\rangle}\to 1$
+      \quad(perfect cloak).
+    \end{center}
+
+    
     \end{column}
     \begin{column}{0.55\textwidth}
       \centering
@@ -535,7 +532,7 @@
       \includegraphics[width=\linewidth]{figures/field_reference_re_mag.png}\\[0.2em]
       % \includegraphics[width=\linewidth]{figures/field_ideal_cloak_re_mag.png}\\[0.2em]
       \includegraphics[width=\linewidth]{figures/field_cloaked_re_mag.png}\\[0.2em]
-      {\scriptsize Top$\to$bottom: reference (no obstacle), ideal polar cloak,
+      {\scriptsize Top$\to$bottom: reference (no obstacle),
       optimised $14\times10$ cloak ($\eta=0.99$).}
     \end{column}
   \end{columns}
@@ -549,11 +546,11 @@
 % ------------------------------------------------------------
 \begin{frame}{Results I -- the cloak in motion}
   \centering
-  \animategraphics[width=0.9\linewidth, autoplay, loop, controls, poster=first]%
+  \animategraphics[width=0.9\linewidth, autoplay, loop, poster=first]%
     {20}{figures/wave_frames/frame-}{001}{060}\\[0.4em]
-  {\scriptsize Vertical displacement $u_y$ at $f^\star=2.0$; the surface wave
-    passes the cloaked notch and re-forms downstream.}
-  \takeaway{The wavefront leaves the cloak intact -- no shadow, no reflected
+  % {\scriptsize Vertical displacement $u_y$ at $f^\star=2.0$; the surface wave
+  %   passes the cloaked notch and re-forms downstream.}
+  \takeaway{The wavefront leaves the optimal cloak intact -- no shadow, no reflected
     front.}
 \end{frame}
 
@@ -582,7 +579,7 @@
       % FIGURE: multifreq_sweep.png
       \includegraphics[width=\linewidth]{frequency_sweep_vis_NF.png}\\
       % \includegraphics[width=\linewidth]{multifreq_sweep.png}\\
-      {\scriptsize $\eta(f)$: broadband design (blue) holds $\approx0.96$ across
+      {\scriptsize $\eta(f)$: broadband design (blue) holds $\approx0.98$ across
       the shaded training band; degrades gracefully outside it.}
     \end{column}
   \end{columns}
@@ -663,6 +660,34 @@
     \end{column}
   \end{columns}
 \end{frame}
+
+\begin{frame}{ Method 2 -- Guided-diffusion generation}
+
+\end{frame}
+
+
+% ------------------------------------------------------------
+%  SLIDE 8b -- Design space: dataset of squared cells
+% ------------------------------------------------------------
+\begin{frame}{Design space: dataset of squared cells}
+  \begin{columns}[T]
+    \begin{column}{0.60\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{figures/squared_cell_samples.png}\\
+      {\scriptsize Real $50\times50$ mirror-symmetric ($D_2$) cells with their
+      homogenised in-plane stiffness~\cite{nakarmi2024}.}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{figures/squared_dataset_coverage.png}\\
+      {\scriptsize $\sim\!10^6$ cells cover a broad
+      $(C_{11},C_{12},C_{66})$ range -- including
+      \textcolor{ASTRAorange}{auxetic} ($C_{12}<0$).}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+
 
 % ------------------------------------------------------------
 %  SLIDE 15 -- Method 2: guided diffusion
@@ -778,21 +803,21 @@
           $+$ JAX-FEM adjoint -- designs Rayleigh-wave carpet cloaks inside the
           realisable Cauchy class.
     \item \textbf{Near-perfect} single-frequency ($\eta=0.99$) and \textbf{broadband}
-          ($\approx0.96$ over an octave) cloaking, beating closed-form
-          symmetrisation.
+          ($\approx0.98$ over a band) cloaking.
     \item Four ML routes to a real structure -- neural-field optimisation,
           inverse design, guided diffusion, latent search -- with
           \textbf{diffusion recovering $\approx97\%$} of ideal performance from a
           \emph{single} constituent.
+    \item Demonstrated that Rayleigh-wave carpet cloaks do \textbf{not} require assymetric materials.
   \end{itemize}
   \vspace{0.6em}
-  \begin{beamercolorbox}[wd=\textwidth, rounded=true, sep=7pt]{block body alerted}
-    \textbf{\textcolor{ASTRAnavy}{Future work:}}
-    \textcolor{ASTRAnavy}{\footnotesize a differentiable generative manifold queried
-    \emph{during} optimisation; multiscale generation with connected neighbours on a
-    body-fitted mesh; 3-D cloaks; and polar/Cosserat microstructures to close the
-    broken-minor-symmetry gap.}
-  \end{beamercolorbox}
+  % \begin{beamercolorbox}[wd=\textwidth, rounded=true, sep=7pt]{block body alerted}
+  %   \textbf{\textcolor{ASTRAnavy}{Future work:}}
+  %   \textcolor{ASTRAnavy}{\footnotesize a differentiable generative manifold queried
+  %   \emph{during} optimisation; multiscale generation with connected neighbours on a
+  %   body-fitted mesh; 3-D cloaks; and polar/Cosserat microstructures to close the
+  %   broken-minor-symmetry gap.}
+  % \end{beamercolorbox}
 \end{frame}
 
 % ------------------------------------------------------------
