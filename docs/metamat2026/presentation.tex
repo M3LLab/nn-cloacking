@@ -233,12 +233,14 @@
       \end{enumerate}
     \end{column}
     \begin{column}{0.49\textwidth}
-      \begin{beamercolorbox}[wd=\textwidth, rounded=true, sep=7pt]{block body alerted}
-        \centering\small
-        Unconstrained design $\to$ \bignum{$\eta=0.99$}{} (near-ideal)\\[0.3em]
-        Best \emph{fabricable} design $\to$ \bignum{$\approx\!97\%$}{ of ideal}\\[0.3em]
-        % {\scriptsize First microstructured Rayleigh-wave cloak from a common material.}
-      \end{beamercolorbox}
+      \begin{block}{ML challenges}
+        \begin{itemize}\footnotesize
+          \item The set of \textbf{realisable materials is discrete}.
+          \item \textbf{Validation is prohibitively expensive}.
+        \end{itemize}
+      \end{block}
+      \vspace{0.2em}
+      % \takeaway{This is why we use a \textbf{two-stage} approach.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -253,7 +255,12 @@
     \begin{column}{0.66\textwidth}
       \centering
       \includegraphics[width=\linewidth]{figures/triangle.jpg}\\[0.4em]
-      \includegraphics[width=\linewidth]{figures/triangle-bottom.jpg}\\[0.6em]
+      \begin{tikzpicture}
+        \node[inner sep=0,anchor=south west] (tb) at (0,0)
+          {\includegraphics[width=\linewidth]{figures/triangle-bottom.jpg}};
+        \draw[red,line width=1.2pt]
+          (tb.south west) -- ([xshift=0.47\linewidth]tb.north west);
+      \end{tikzpicture}\\[0.6em]
       {\scriptsize A pixel grid stores one value per unit cell; the neural field
       $f_\phi(x,y)$ stores the whole material as network weights --- resolution-free
       and smooth by construction.}
