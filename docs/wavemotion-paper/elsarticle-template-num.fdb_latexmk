@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex elsarticle-template-num"] 1784292365.23784 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1784292374.35825 0
+["bibtex elsarticle-template-num"] 1785252292.86222 "elsarticle-template-num.aux" "elsarticle-template-num.bbl" "elsarticle-template-num" 1785252297.78404 0
   "./cas-refs.bib" 1783941667.40277 8717 fc910c7dda95cc37290ab0b5d6ca8b6d ""
   "./elsarticle-num-names.bst" 1783701782.28213 28896 ef8ea1833e4d69d9f60b6db23b4bea61 ""
-  "elsarticle-template-num.aux" 1784292373.88143 20068 6b944aadb0c4220fd6aa77bb0b216f55 "pdflatex"
+  "elsarticle-template-num.aux" 1785252297.45324 19361 c09d816ce1713f46934b541e2f6aca15 "pdflatex"
   (generated)
   "elsarticle-template-num.bbl"
   "elsarticle-template-num.blg"
   (rewritten before read)
-["pdflatex"] 1784292365.39671 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1784292374.35849 2
+["pdflatex"] 1785252292.98657 "elsarticle-template-num.tex" "elsarticle-template-num.pdf" "elsarticle-template-num" 1785252297.78419 2
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1136849721 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm" 1136768653 3584 2d666ecf6d466d8b007246bc2f94d9da ""
@@ -195,22 +195,20 @@
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1772288159 3636404 0d6b22a798b2c182d7f754d1f98c8969 ""
   "/usr/local/texlive/2025/texmf.cnf" 1772288092.0538 455 5b996dcaa0eb4ef14a83b026bc0a008c ""
   "bloch_dispersion.png" 0 -1 0 ""
-  "elsarticle-template-num.aux" 1784292373.88143 20068 6b944aadb0c4220fd6aa77bb0b216f55 "pdflatex"
-  "elsarticle-template-num.bbl" 1784292365.3905 10916 453e28d66250da529c59a92b32127902 "bibtex elsarticle-template-num"
-  "elsarticle-template-num.spl" 1784292365.6654 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "elsarticle-template-num.tex" 1784292272.42036 70602 356684528f71c1a3cc279df2b1e56ce5 ""
+  "elsarticle-template-num.aux" 1785252297.45324 19361 c09d816ce1713f46934b541e2f6aca15 "pdflatex"
+  "elsarticle-template-num.bbl" 1785252292.98172 10916 453e28d66250da529c59a92b32127902 "bibtex elsarticle-template-num"
+  "elsarticle-template-num.spl" 1785252293.19418 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "elsarticle-template-num.tex" 1785252265.86299 68030 fdeda376d27d09ee273ab7e6d5aabce9 ""
   "elsarticle.cls" 1783701773.0841 45216 8d57180189bc20f55de1fd7b66d8c091 ""
   "figures/cloak_microstructure_diffusion.png" 1783875427.32856 64007 edc25636e54e69f69b2d72ce14904b05 ""
   "figures/cloak_microstructure_inverse.png" 1783875427.32927 65273 14d15c298f1fb30b950b8acd0a09946b ""
   "figures/micro_bestof_dumbbell.png" 1783939350.15638 213155 becffa9b24b39903c7317dea34a3aa0a ""
   "figures/micro_method_comparison_sweep.png" 1783890299.92308 110317 2547ca0a6175effee8385ca232f3c78b ""
-  "figures/ml-pipeline.png" 1783890424.00516 1285497 c1b9a25f2293b8889035f2a791db8048 ""
   "figures/multifreq_sweep.png" 1783860609.30335 97702 9300ce0d8dc1e4741faf99af69a29817 ""
   "figures/problem-setup.png" 1783775979.71308 611416 c5c74405cfbbf03902ff1f38a3ab7440 ""
   "figures/single_freq_14x10_material.png" 1783852995.24717 433118 dde1bdfc957dbea19eae87905dfde98f ""
   "figures/single_freq_14x10_re_mag.png" 1783852995.24026 2217064 5622126ccd2be20706dc1d2a335c622b ""
   "figures/single_freq_14x10_zoom_phase.png" 1783855713.58278 999014 a42cffda0550563c7bbe2d0e76ac0351 ""
-  "figures/single_vs_symmetrized_sweep.png" 1783852995.23163 143116 5d15ede98cd7fcddedb967422499e58a ""
   "figures/triangular-cell-decomposition.png" 1783775984.45809 156594 4c59707e5ce8df02485312d86ddc1298 ""
   (generated)
   "elsarticle-template-num.aux"

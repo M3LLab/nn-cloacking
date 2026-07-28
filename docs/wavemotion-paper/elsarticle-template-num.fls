@@ -280,16 +280,6 @@ INPUT ./figures/triangular-cell-decomposition.png
 INPUT ./figures/triangular-cell-decomposition.png
 INPUT ./figures/triangular-cell-decomposition.png
 INPUT /usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0600.tfm
-INPUT ./figures/ml-pipeline.png
-INPUT ./figures/ml-pipeline.png
-INPUT ./figures/ml-pipeline.png
-INPUT ./figures/ml-pipeline.png
-INPUT ./figures/ml-pipeline.png
-INPUT ./figures/single_vs_symmetrized_sweep.png
-INPUT ./figures/single_vs_symmetrized_sweep.png
-INPUT ./figures/single_vs_symmetrized_sweep.png
-INPUT ./figures/single_vs_symmetrized_sweep.png
-INPUT ./figures/single_vs_symmetrized_sweep.png
 INPUT ./figures/single_freq_14x10_re_mag.png
 INPUT ./figures/single_freq_14x10_re_mag.png
 INPUT ./figures/single_freq_14x10_re_mag.png

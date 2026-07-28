@@ -11,6 +11,13 @@
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,fit,backgrounds,shapes.geometric}
 
+% Colours for the neural-field dataflow diagram (Fig.~\ref{fig:nf-arch})
+\usepackage{xcolor}
+\definecolor{ASTRAblue}{RGB}{31,90,158}
+\definecolor{ASTRAnavy}{RGB}{20,42,84}
+\definecolor{ASTRAorange}{RGB}{224,122,31}
+\definecolor{ASTRAbglight}{RGB}{233,240,250}
+
 \journal{Wave Motion}
 
 \graphicspath{{./figs/}}
@@ -509,7 +516,21 @@ $\eta\to1$ for a perfect cloak.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.95\linewidth]{figures/ml-pipeline.png}
+  \begin{tikzpicture}[font=\footnotesize,>={Latex[length=2mm]},node distance=6mm,
+      box/.style={draw=ASTRAblue,fill=ASTRAbglight,rounded corners=2pt,thick,
+                  inner sep=4pt,align=center,minimum height=9mm}]
+    \node[box] (xy)  {cell coords\\$(x,y)$};
+    \node[box,right=of xy] (nf) {neural field\\$\Phi_\theta$};
+    \node[box,right=of nf] (mat) {material\\$(\mbf{C}_{\mathrm{4CM}},\rho)$};
+    \node[box,right=of mat] (fem) {JAX-FEM\\wave solve};
+    \node[box,right=of fem] (loss) {cloak loss\\$\mcl{L}$};
+    \draw[->,thick,ASTRAnavy] (xy)--(nf);
+    \draw[->,thick,ASTRAnavy] (nf)--(mat);
+    \draw[->,thick,ASTRAnavy] (mat)--(fem);
+    \draw[->,thick,ASTRAnavy] (fem)--(loss);
+    \draw[->,thick,dashed,ASTRAorange] (loss.south) to[out=-90,in=-90]
+          node[below,midway]{adjoint gradient $\partial\mcl{L}/\partial\theta$} (nf.south);
+  \end{tikzpicture}
   \caption{Neural-field design pipeline. Cell-centre coordinates are
   mapped through a Fourier positional encoding into a four-layer MLP
   that predicts the four free Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$
@@ -693,79 +714,33 @@ convergence sweep (Secs.~\ref{subsec:grid_selection}--\ref{subsec:final14}).
 
 We first ask how far a \emph{single} realisable material can go. Both cloak
 phases are collapsed onto one orthotropic 4CM tile (a $1\times1$ cell filling
-the whole cloak) and its four Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$
-and density are optimised through the differentiable FEM at $f^\star=2.0$. The
+the whole cloak) whose four Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$ and
+density are optimised through the differentiable FEM at $f^\star=2.0$. The
 natural point of comparison is the closed-form arithmetic-mean symmetrisation
-of \citet{chatzopoulos2023}: the ideal polar tensor~\eqref{eq:Ceff} made
-minor-symmetric by averaging each broken pair, instantiated on the same mesh
-and solved with the same FEM.
-
-It is worth being precise about what that baseline actually is, because it is
-richer than the $1\times1$ tile it is compared against. Symmetrisation
-\emph{averages} each broken pair of Sec.~\ref{subsec:triangular} to its mean
-rather than annihilating it, so the coupling entries $c_{11,12}$ and
-$c_{22,12}$ survive: the symmetrised medium retains normal--shear coupling and
-is a \emph{fully anisotropic} Cauchy material --- six free moduli
-$(C_{11},C_{22},C_{66},C_{12},C_{16},C_{26})$ and a density, which we label
-6CM --- rather than the orthotropic form~\eqref{eq:4cm}. Nor is it one
-material: as noted in Sec.~\ref{subsec:triangular}, $F_{21}$ merely changes
-sign across the centreline, so the ideal tensor~\eqref{eq:Ceff} and its
-symmetrisation alike consist of two mirror-image phases. The single 4CM tile
-therefore competes against symmetrisation from strictly \emph{less} material
-freedom: one orthotropic tensor against two anisotropic ones.
+of \citet{chatzopoulos2023}, instantiated and solved on the same mesh. That
+baseline is in fact richer than the tile it is compared against: averaging each
+broken pair to its mean (rather than annihilating it) keeps the normal--shear
+coupling $(C_{16},C_{26})$, so the symmetrised medium is a \emph{fully
+anisotropic} 6CM Cauchy material, and, since $F_{21}$ only changes sign across
+the centreline, it is \emph{two} such mirror phases. The single 4CM tile thus
+competes from strictly less freedom: one orthotropic tensor against two
+anisotropic ones.
 
 Table~\ref{tab:single_vs_sym} reports the outcome. The symmetrised tensor
-recovers only $\eta=0.63$ and actually distorts the near field more than the
-bare notch (the ideal-material minor-symmetry violation is large at
-$f^\star=2$). A single optimised orthotropic material instead reaches
-$\eta=0.86$ --- a substantial jump towards the ideal continuous polar cloak
-($\eta=0.999$) obtained from just one degree of material freedom per phase,
-from a smaller material class and half the materials, and clear evidence that
-optimising inside the Cauchy class outperforms symmetrisation. It is, however,
-still far from perfect:
-one material most certainly cannot reproduce the cloaking of the ideal tensor.
-Figure~\ref{fig:single_vs_sym_sweep} confirms that the advantage is
-concentrated around the design frequency, as expected for a single-frequency
-optimisation.
+recovers only $\eta=0.63$ and distorts the near field more than the bare notch,
+whereas a single optimised orthotropic tile reaches $\eta=0.86$ --- a
+substantial move towards the ideal continuous polar cloak ($\eta=0.999$) from a
+smaller material class and half the materials, and clear evidence that
+optimising inside the Cauchy class outperforms symmetrisation.
+The advantage is concentrated around the design frequency, as expected for a
+single-frequency optimisation. Matching the baseline's own 6CM class and
+material count --- two optimised tiles, one per half --- makes the comparison like-for-like and lifts
+this to $\eta=0.947$.
 
-That the two halves of the ideal cloak are mirror images also pins down
-exactly what a second material must supply, and why one tile saturates near
-$\eta=0.86$ for structural rather than numerical reasons. Evaluating the two
-halves shows that the mirror acts \emph{only} on the coupling: symmetrised,
-both share $(C_{11},C_{22},C_{66},C_{12})=(648,293,56,403)\,$MPa and
-$\rho=2400\,$kg\,m$^{-3}$, and differ solely in
-$(C_{16},C_{26})=(\pm162,\pm110)\,$MPa. The orthotropic class~\eqref{eq:4cm}
-sets $C_{16}=C_{26}=0$ identically, so both ideal halves collapse onto the
-\emph{same} 4CM tensor: within 4CM a left--right split offers no freedom the
-ideal cloak actually uses, and one tile is already the best a 4CM design can
-do with such a split.
-
-Matching the symmetrisation baseline in both respects --- its own 6CM class,
-and one tile per half --- makes the comparison like-for-like and closes much
-of the remaining gap: two optimised 6CM tiles, one on each side of $x_c$,
-reach $\eta=0.947$ against symmetrisation's $0.634$ on the same mesh, source,
-loss and design frequency (Table~\ref{tab:single_vs_sym}). Given identical
-material freedom, gradient-based design thus recovers roughly two thirds of
-the gap that hand symmetrisation leaves. The optimiser also
-rediscovers the cloak's mirror structure unprompted: from an isotropic seed it
-converges to tensors that are mirror images to within $3\%$, and constraining
-the pair to be exactly mirror-symmetric costs only $0.002$ in $\eta$
-($0.944$ versus $0.947$) at half the design variables. The small residual
-asymmetry reflects the one-sided incident wave, which breaks the symmetry of
-the scattering problem that the geometry itself possesses.
-
-Two caveats bound this result. First, $\eta=0.947$ is a \emph{continuum-level}
-statement: the optimised tensors are genuinely non-orthotropic --- no rotation
-brings both $C_{16}$ and $C_{26}$ to zero (the residual coupling remains
-$10$--$34\%$ of $\sqrt{C_{11}C_{66}}$) --- so they cannot be realised by the
-$D_2$-symmetric square cells of Sec.~\ref{sec:micro}, whose edge mirrors force
-$C_{16}=C_{26}=0$, nor by rotating such cells. This limitation is shared by
-the symmetrisation baseline, which is 6CM for the same reason, and it is what
-motivates restricting the remainder of the paper to the 4CM class that the
-microstructure catalogue can actually build. Second, the optimum is not the
-transformation cloak: it stiffens the shear modulus $8\times$ and the density
-$1.7\times$ relative to the ideal tensor while halving $C_{12}$, consistent
-with the symmetrised ideal itself reaching only $\eta=0.63$.
+The 6CM design is included only for a comparison with the
+symmetrisation baseline. It is not realisable by the $D_2$-symmetric square
+cells of Sec.~\ref{sec:micro}, so the rest of the paper focuses on the 4CM
+class that the microstructure catalogue can actually build.
 
 \begin{table}[htbp]
 \centering
@@ -783,7 +758,6 @@ cells of Sec.~\ref{sec:micro} (see text).}
 \toprule
 Configuration & Materials & Class & $\eta$ \\
 \midrule
-Obstacle (no cloak)                        & --- & ---            & $0.37$  \\
 Symmetrised ideal (Chatzopoulos)           & 2   & 6CM            & $0.634$ \\
 Single optimised material ($1\times1$)     & 1   & 4CM            & $0.857$ \\
 Optimised left/right pair ($2\times1$)     & 2   & 6CM            & $\mathbf{0.947}$ \\
@@ -792,19 +766,6 @@ Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & 2 & polar & $0.999$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.9\linewidth]{figures/single_vs_symmetrized_sweep.png}
-  \caption{Frequency sweep of the cloak ratio
-  $\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ for the
-  single-material designs: the ideal continuous transformation cloak
-  (red, $\eta\approx1$ at every frequency), the closed-form symmetrised
-  tensor of \citet{chatzopoulos2023} (purple), and the single optimised
-  $1\times1$ material (blue). At the training frequency $f^\star=2$ the
-  optimised material recovers $\eta=0.86$ against $0.63$ for symmetrisation.}
-  \label{fig:single_vs_sym_sweep}
-\end{figure}
 
 \subsection{How many distinct materials does the cloak need?}\label{subsec:four_materials}
 
@@ -962,7 +923,7 @@ the $46$ cloak cells.
 The single-frequency designs of Sec.~\ref{sec:single_freq} are optimised at
 one frequency and, being tuned to it, cloak well only in a narrow neighbourhood
 of $f^\star=2$: away from the design frequency the cloak ratio falls off
-markedly (Fig.~\ref{fig:single_vs_sym_sweep}). Because the ideal triangular
+markedly. Because the ideal triangular
 tensor~\eqref{eq:Ceff} is frequency-independent and cloaks exactly at every
 frequency, this narrowness is a limitation of the single-frequency
 \emph{objective}, not of the material class. We therefore train a single design
@@ -1104,7 +1065,11 @@ Sec.~\ref{sec:method} is trained with the manifold penalty
 added to the single-frequency or band cloak loss. The penalty pulls every cell
 into $\mcl{M}$ without pinning it to a specific catalogue entry, while the
 positive-definiteness and bounded-anisotropy guarantees of
-Sec.~\ref{sec:constrained} keep every intermediate design admissible.
+Sec.~\ref{sec:constrained} keep every intermediate design admissible. For the
+constrained runs we move from the $14\times10$ grid of Sec.~\ref{sec:single_freq}
+to a finer $20\times15$ grid --- which places exactly $100$ cells inside the
+cloak --- in the expectation that the extra per-cell freedom would let the
+constrained optimisation reach a good realisable solution more easily.
 
 \paragraph{Step 5 -- Microstructure realisation.} Each optimised per-cell target
 $(\mbf{C}_{\mathrm{4CM}},\rho)$ is turned into an explicit $50\times50$
@@ -1336,9 +1301,7 @@ ten components) is retained as the mathematical reference, while all
 optimised designs are Cauchy. The pipeline recovers near-perfect
 single-frequency cloaking, flattens the cloak loss across a target
 frequency band, and can be projected onto a realisability manifold and
-realised as explicit binary microstructures built from a single constituent
--- to our knowledge the first microstructured realisation of a
-Rayleigh-wave elastodynamic carpet cloak from a common material --
+realised as explicit binary microstructures built from a single constituent 
 recovering approximately $97\%$ of the ideal cloaking performance.
 
 %% Bibliography
