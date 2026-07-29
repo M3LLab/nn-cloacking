@@ -111,14 +111,14 @@ under microstructure realisability constraints}
 
 \begin{abstract}
 
-Transformation elasticity provides exact material distributions for elastodynamic cloaks, but the required stiffness tensors generally violate the minor symmetries of classical Cauchy elasticity and are difficult to realize using conventional materials. 
-Existing approaches restore these symmetries by modifying or symmetrizing the transformed tensor, producing only an approximate cloak. 
-Here we formulate 2D Rayleigh-wave carpet-cloak design as a PDE-constrained optimization problem, using a coordinate-based neural network and a differentiable finite-element solver to optimize symmetric stiffness and density fields by minimizing wave-field distortion. 
-We consider both single-frequency and broadband optimization, with the broadband model trained simultaneously over multiple frequencies. 
+Transformation elasticity provides exact material distributions for elastodynamic cloaks, but the required stiffness tensors generally violate the minor symmetries of classical Cauchy elasticity and are difficult to realise using conventional materials.
+Existing approaches restore these symmetries by modifying or symmetrising the transformed tensor, producing only an approximate cloak.
+Here we formulate 2D Rayleigh-wave carpet-cloak design as a PDE-constrained optimisation problem, using a coordinate-based neural network and a differentiable finite-element solver to optimise symmetric stiffness and density fields by minimising wave-field distortion.
+We consider both single-frequency and broadband optimisation, with the broadband model trained simultaneously over multiple frequencies.
 
-Physical realizability is addressed using a database of homogenized microstructures through conditional diffusion, neural-field inverse design, and nearest-neighbour selection. 
-FEM simulations show that the unconstrained design approaches ideal transformation-based cloaking, 
-while the best realizable design retains approximately 97\% of this performance, providing a direct route from continuum optimization to microstructured Rayleigh-wave cloaks.
+Physical realisability is addressed using a database of homogenised microstructures through conditional diffusion, neural-field inverse design, and nearest-neighbour selection.
+FEM simulations show that the unconstrained design approaches ideal transformation-based cloaking,
+while the best realisable design retains approximately 97\% of this performance, providing a direct route from continuum optimisation to microstructured Rayleigh-wave cloaks.
 
 \end{abstract}
 
@@ -173,7 +173,7 @@ The triangular cloak is, however, especially attractive because its piecewise-af
 has a constant Jacobian within each half of the cloak and consequently, the required effective 
 material properties are homogeneous in each region.
 
-Our approach to find a design inside the Cauchy class of ordinary
+Our approach to finding a design inside the Cauchy class of ordinary
 materials is a differentiable pipeline built on a JAX-FEM solver~\citep{xu2020jaxfem}
 that evaluates a wave-field cloaking objective, with gradients flowing
 end-to-end through the FEM adjoint. We optimise
@@ -215,8 +215,8 @@ The paper is organised as follows. Section~\ref{sec:setup} sets up the
 half-space problem, the BGM push-forward for the triangular carpet, the
 cell discretisation, and the JAX-FEM solver and metrics.
 Section~\ref{sec:method} introduces the neural-field design pipeline.
-Section~\ref{sec:single_freq} reports single-frequency results against the
-ideal and symmetrised baselines. Section~\ref{sec:multifreq} extends the
+Section~\ref{sec:results} reports the single-frequency results against the
+ideal and symmetrised baselines and extends the
 design to a broadband objective. Section~\ref{sec:micro} constrains the
 cloak to realisable microstructures and validates the single-material
 realisation. Section~\ref{sec:discussion} discusses the results and their
@@ -225,20 +225,6 @@ limitations, and Section~\ref{sec:conclusion} concludes.
 %% =============================================================
 \section{Problem setup and FEM baseline}\label{sec:setup}
 %% =============================================================
-
-% Figure~\ref{fig:setup} summarises the computational configuration. A
-% time-harmonic vertical point force applied on the traction-free surface
-% of an isotropic half-space $(\lambda,\mu,\rho)$ launches a Rayleigh wave
-% that propagates horizontally towards a triangular surface notch. The
-% rectangular domain of width $W=12.5\,b$ and depth $H$ is truncated by
-% Perfectly Matched Layer (PML) absorbing regions on the two lateral
-% sides and the bottom; the top surface remains traction-free. The inset
-% (Fig.~\ref{fig:setup}b) shows the cloak geometry in detail: the
-% triangular defect of depth $a$ and half-width $c$ is enclosed by the
-% outer cloak boundary at depth $b$, whose two inclined faces define the
-% inner and outer triangle boundaries $z_1$ and $z_2$; the two mirror
-% phases of the cloak (related by the sign change of the shear $F_{21}$
-% across the centreline $X_1=0$) are shaded separately.
 
 \begin{figure}[htbp]
   \centering
@@ -265,7 +251,7 @@ coefficients and $\rho$ the mass density, and spatial coordinates
 $\mbf{X}=(X_1,X_2)$ for the reference domain, with the free surface on
 $X_2=0$. For in-plane surface waves, i.e.\ Rayleigh waves, propagating
 along the horizontal $X_1$ direction, the governing Navier
-elastodynamic equation the following form
+elastodynamic equation takes the following form
 \be\label{eq:navier_ref}
   \nabla_{\!X}\cdot\bigl(\mbf{C}:\nabla_{\!X}\mbf{U}\bigr)
   = \rho\,\mbf{U}_{tt},
@@ -450,15 +436,8 @@ whose centre lies between the inner and outer triangles
 stiffness and the density~\eqref{eq:rhoeff}. Because the triangular
 transformation is affine in Cartesian coordinates, the
 tensor~\eqref{eq:Ceff} is passed to the FEM solver without any rotation
-to a local frame. The ideal cloak tensor~\eqref{eq:Ceff} is the full $4\times4$
-augmented-Voigt polar tensor with ten independent components. Because
-real materials are Cauchy (minor-symmetric), the per-cell design variable
-is four free orthotropic Cauchy moduli $(C_{11},C_{12},C_{22},C_{66})$
-and a scalar density, which are searched numerically by the differentiable
-optimiser. A systematic investigation of grid resolution established
-$14\times10$ as the optimal discretisation, balancing approximation
-fidelity against per-iteration computational cost; this resolution is
-used in all single-frequency experiments reported below.
+to a local frame. The grid resolution is itself a design choice and is
+selected in Sec.~\ref{subsec:grid_selection}.
 
 \begin{figure}[htbp]
   \centering
@@ -481,7 +460,8 @@ traction-free; PML absorbing layers terminate the two lateral
 boundaries and the bottom. A triangular surface notch of depth
 $a=0.0774\,H$ and half-width $c=0.1545\,H$ is centred on the free
 surface, coated by a cloak of depth $b=3a$. The background medium is
-isotropic with $\rho=1600\,\text{kg}/\text{m}^3$, shear speed
+soil, modelled as an isotropic elastic half-space with
+$\rho=1600\,\text{kg}/\text{m}^3$, shear speed
 $c_s=300\,\text{m/s}$, and $c_p=\sqrt{3}\,c_s$
 ($\nu=1/4$, $\lambda=\mu=144\,\text{MPa}$, plane strain). The
 excitation is a time-harmonic vertical point force applied on the free
@@ -502,17 +482,11 @@ solve to the cloaking loss is differentiable via implicit adjoint
 differentiation through the linear FEM solve, enabling gradient-based
 optimisation of the per-cell stiffness and density.
 
-\subsection{Cloaking metrics}
+%% =============================================================
+\section{Neural-field design pipeline}\label{sec:method}
+%% =============================================================
 
-The design objective is the magnitude-band
-integral~\eqref{eq:opt_loss_cloak}: the mean-squared relative error of
-the displacement magnitude over a near-surface strip beyond the cloak, 
-which optimisation minimises. To report performance we also
-use the dimensionless cloak ratio
-$\eta=\langle|\mbf{u}|\rangle/\langle|\mbf{u}_{\mathrm{ref}}|\rangle$ over
-the free surface beyond the cloak footprint, following
-\citet{chatzopoulos2023}; it is an interpretable evaluation metric, with
-$\eta\to1$ for a perfect cloak.
+\subsection{Coordinate-conditioned material network}
 
 \begin{figure}[htbp]
   \centering
@@ -540,12 +514,6 @@ $\eta\to1$ for a perfect cloak.
   \label{fig:nf-arch}
 \end{figure}
 
-%% =============================================================
-\section{Neural-field design pipeline}\label{sec:method}
-%% =============================================================
-
-\subsection{Coordinate-conditioned material network}
-
 We reparameterise the cloak material field through a coordinate-based
 multilayer perceptron (MLP)
 \be\label{eq:neural_field}
@@ -561,11 +529,8 @@ A four-layer MLP with 256 hidden units ($\sim\!200{,}000$ weights) is
 used in all experiments; we adopt $\tanh$ activations and the Fourier
 positional encoding of \citet{tancik2020fourier} so that the network
 can represent sharp material transitions near the cloak boundaries.
-
 Figure~\ref{fig:nf-arch} shows the architecture and the data flow
-through the differentiable FEM. Gradients
-$\partial\mathcal{L}/\partial\theta$ are obtained by backpropagating
-through the JAX-FEM adjoint solve and into the network.
+through the differentiable FEM.
 
 \subsection{Transformation-elasticity prior}
 
@@ -576,7 +541,7 @@ arithmetic-mean symmetrisation of the ideal tensor~\eqref{eq:Ceff} and the mean 
 microstructure dataset (Sec.~\ref{sec:micro}) -- and found no statistically
 significant difference in the converged results, indicating that the design
 is driven by the cloaking objective rather than by the initialisation.
-Concretely, the last layer is scaled near zero
+In practice, the last layer is scaled near zero
 ($\mbf{W}\leftarrow 0.01\,\mbf{W},\;\mbf{b}\leftarrow\mbf{0}$) and the
 network output is applied as a \emph{multiplicative residual} with default
 output scale $\epsilon=0.1$:
@@ -593,13 +558,12 @@ output scale $\epsilon=0.1$:
 \end{subequations} The multiplicative form makes
 the relative perturbation spatially uniform regardless of the orders of
 magnitude separating the stiffness and density entries within each
-cloak phase. An additive variant is also implemented but produces more
-poorly conditioned gradients in practice.
+cloak phase.
 
 \subsection{Physical admissibility of the material output}\label{sec:constrained}
 
-The multiplicative residual~\eqref{eq:neural_relative} places no bound on
-the microstructure realisability -- MLP can drive
+The multiplicative residual~\eqref{eq:neural_relative} does not by itself guarantee 
+a realisable material -- the MLP can drive
 a stiffness negative, break the positive-definiteness of the Cauchy
 tensor, or reach an anisotropy ratio no real microstructure can realise.
 Rather than police these violations with penalty terms after the fact, we
@@ -675,42 +639,40 @@ cloak/defect footprint,
 where $\mbf{u}_{\mathrm{cloak}}$ and $\mbf{u}_{\mathrm{ref}}$ are the
 cloaked and defect-free reference fields and $x_c$ is the downstream edge
 of the cloak. Comparing magnitudes rather than the complex fields
-themselves makes the objective phase-invariant, which is a
-deliberate advantage here: a wave
+themselves makes the objective phase-invariant, which is deliberate here: a wave
 that is diverted around the defect follows a slightly longer path and
 arrives with a small phase lag relative to the flat-surface reference.
 An explicit
 neighbour-smoothness term used in raw-parameter
 baselines~\citep{wang2022} is unnecessary here: the neural field is
 spatially continuous by construction, and its smoothness is controlled
-directly through the Fourier positional
-encoding~\citep{tancik2020fourier}. The number and bandwidth of the
-Fourier features set the spatial frequency content the network can
-represent---low frequencies yield smooth, gently varying material fields,
-whereas adding higher-frequency components lets the field resolve sharper
-transitions near the cloak boundaries. 
+directly through the number and bandwidth of the Fourier positional
+features~\citep{tancik2020fourier}.
 
-%% =============================================================
-\section{Single-frequency results}\label{sec:single_freq}
-%% =============================================================
-
-All single-frequency results are reported at the design frequency
-$f^\star=2.0$ through the dimensionless \emph{cloak ratio}
+While~\eqref{eq:opt_loss_cloak} is what the optimiser minimises, performance
+is \emph{reported} through the dimensionless \emph{cloak ratio}
 \be\label{eq:cloak_ratio}
   \eta \;=\;
   \frac{\langle|\mbf{u}|\rangle}{\langle|\mbf{u}_{\mathrm{ref}}|\rangle}
 \ee
 of the mean surface-displacement magnitude on the free surface beyond the
-cloak footprint to that of the defect-free reference (Sec.~\ref{sec:setup}),
-so that $\eta\to1$ is perfect cloaking and $|1-\eta|$ measures the residual
-distortion. We build up the design in three steps of increasing material
-freedom: a single homogeneous realisable material
-(Sec.~\ref{subsec:single_material}), a handful of independent materials
-(Sec.~\ref{subsec:four_materials}), and finally a cell grid selected by a
-convergence sweep (Secs.~\ref{subsec:grid_selection}--\ref{subsec:final14}).
+cloak footprint to that of the defect-free reference, following
+\citet{chatzopoulos2023}, so that $\eta\to1$ is perfect cloaking.
 
-\subsection{A single realisable material already beats symmetrisation}
-\label{subsec:single_material}
+%% =============================================================
+\section{Results}\label{sec:results}
+%% =============================================================
+
+Unless stated otherwise, results are reported at the design frequency
+$f^\star=2.0$ through the cloak ratio~\eqref{eq:cloak_ratio}. We build up
+the design in steps of increasing material freedom --- from a single
+homogeneous realisable material to a full cell grid
+(Secs.~\ref{subsec:four_materials}--\ref{subsec:final14}) --- then widen the
+objective from one frequency to a band (Sec.~\ref{sec:multifreq}) and verify
+that the resulting medium is physically admissible
+(Sec.~\ref{subsec:bloch}).
+
+\subsection{How many distinct materials does the cloak need?}\label{subsec:four_materials}
 
 We first ask how far a \emph{single} realisable material can go. Both cloak
 phases are collapsed onto one orthotropic 4CM tile (a $1\times1$ cell filling
@@ -767,91 +729,32 @@ Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & 2 & polar & $0.999$ \\
 \end{tabular*}
 \end{table}
 
-\subsection{How many distinct materials does the cloak need?}\label{subsec:four_materials}
-
 Giving each phase more freedom closes most of the remaining gap. Splitting
 the cloak into a coarse $n_x\times n_y$ grid of independent orthotropic tiles
 and optimising all of them jointly, we find that even a $2\times2$
 decomposition --- just \emph{four} realisable materials --- lifts the cloak
-ratio to $\eta=0.962$, i.e.\ within $4\%$ of a perfect cloak
-(Table~\ref{tab:partition}). The improvement is markedly anisotropic:
-subdividing in depth helps far more than in the propagation direction
-($1\times2$ reaches $\eta=0.92$ whereas $2\times1$ actually drops to
-$\eta=0.78$), reflecting that the ideal cloak material varies mainly with
-depth through the shear map~\eqref{eq:shearmap}. Beyond four materials the
-gain per added cell is small, motivating a more systematic grid study.
+ratio to $\eta=0.962$, i.e.\ within $4\%$ of a perfect cloak. The improvement
+is markedly anisotropic: subdividing in depth helps far more than in the
+propagation direction ($1\times2$ reaches $\eta=0.92$ whereas $2\times1$
+actually drops to $\eta=0.78$), reflecting that the ideal cloak material
+varies mainly with depth through the shear map~\eqref{eq:shearmap}. Beyond
+four materials the gain per added cell is small, motivating a more systematic
+grid study.
 
-\begin{table}[htbp]
-\centering
-\caption{Cloak ratio $\eta$ at $f^\star=2.0$ for coarse decompositions, each
-cell an independent orthotropic material optimised jointly. Four materials
-($2\times2$) already reach $\eta=0.962$.}
-\label{tab:partition}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccc@{}}
-\toprule
-Decomposition $n_x\times n_y$ & Materials & $\eta$ & $|1-\eta|$ \\
-\midrule
-$1\times1$          & 1 & $0.857$ & $0.143$ \\
-$2\times1$          & 2 & $0.780$ & $0.220$ \\
-$1\times2$          & 2 & $0.920$ & $0.080$ \\
-$3\times1$          & 3 & $0.939$ & $0.061$ \\
-$\mathbf{2\times2}$ & \textbf{4} & $\mathbf{0.962}$ & $\mathbf{0.038}$ \\
-$3\times2$          & 6 & $0.964$ & $0.036$ \\
-\bottomrule
-\end{tabular*}
-\end{table}
-
-\subsection{Grid selection by a cell-convergence sweep}
+\subsection{Grid selection}
 \label{subsec:grid_selection}
 
-To push towards perfect cloaking we refine the grid, but the resolution must
-be chosen so that cloaking has \emph{converged} while the per-iteration cost
-stays low. We therefore run a single-frequency cell sweep over seven
-Cartesian grids from $5\times4$ to $32\times24$, optimising each to
-convergence and recording the cloak ratio (Table~\ref{tab:cell_sweep}).
+Refining the grid further, we selected the resolution by weighing cloaking
+performance against optimisation cost. Materials are assigned only to cells
+whose centre falls between the inner and outer triangles~\eqref{eq:triangles},
+so an $n_x\times n_y$ grid uses far fewer than $n_x n_y$ materials. The
+$14\times10$ grid nominally spans $140$ cells but places only $46$ inside the
+cloak region; these $46$ are the actual design variables. It proved optimal in
+this trade-off: cloaking is already converged at $\eta\approx0.99$, while
+finer grids only multiply the solve cost without improving on it. We adopt
+$14\times10$ for all subsequent single-frequency work.
 
-A key point is that materials are assigned only to cells whose centre falls
-between the inner and outer triangles~\eqref{eq:triangles}, so an
-$n_x\times n_y$ grid uses far fewer than $n_x n_y$ materials: the triangular
-cloak occupies only a fraction of its Cartesian bounding box. The
-$14\times10$ grid nominally spans $140$ cells but places only
-\textbf{46 cells inside the cloak region}; these $46$ are the actual design
-variables, the remaining $94$ being background (see the ``cloak cells'' column
-of Table~\ref{tab:cell_sweep}).
-
-The cloak ratio saturates on a plateau at $\eta\approx0.99$
-($|1-\eta|\approx0.01$) by $14\times10$: the three finer grids
-($20\times15$, $26\times20$, $32\times24$) give no further improvement --- and
-even a marginal regression from FEM cost and optimisation noise --- while
-their cell counts, and hence solve cost, grow several-fold. The $14\times10$
-grid is the smallest decomposition sitting firmly on this converged
-sub-$1\%$ plateau, and we adopt it for all subsequent single-frequency
-work: it is stable (on the plateau), cheap (only $46$ active
-materials), and fast to optimise.
-
-\begin{table}[htbp]
-\centering
-\caption{Cell-convergence sweep at $f^\star=2.0$: cloak ratio $\eta$ versus
-grid resolution. ``Cloak cells'' counts the cells inside the triangular cloak
-(the active design variables, far fewer than $n_x n_y$). Cloaking plateaus at
-$\eta\approx0.99$ from $14\times10$ onward.}
-\label{tab:cell_sweep}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lcccc@{}}
-\toprule
-Grid $n_x\times n_y$ & Total cells & Cloak cells & $\eta$ & $|1-\eta|$ \\
-\midrule
-$5\times4$            & 20  & 7   & $0.944$ & $0.056$ \\
-$8\times6$            & 48  & 16  & $0.943$ & $0.057$ \\
-$10\times8$           & 80  & 28  & $0.977$ & $0.023$ \\
-$\mathbf{14\times10}$ & \textbf{140} & \textbf{46} & $\mathbf{0.990}$ & $\mathbf{0.010}$ \\
-$20\times15$          & 300 & 100 & $0.990$ & $0.010$ \\
-$26\times20$          & 520 & 176 & $0.988$ & $0.012$ \\
-$32\times24$          & 768 & 256 & $0.988$ & $0.012$ \\
-\bottomrule
-\end{tabular*}
-\end{table}
-
-\subsection{Near-perfect cloaking on the $14\times10$ grid}\label{subsec:final14}
+\subsection{Near-perfect single-frequency cloaking}\label{subsec:final14}
 
 The adopted $14\times10$ design ($46$ optimised in-cloak materials) reaches
 $\eta=0.990$, effectively closing the gap to the ideal continuous cloak.
@@ -914,13 +817,9 @@ the $46$ cloak cells.
   \label{fig:single14_material}
 \end{figure}
 
-%% =============================================================
-\section{Broadband multifrequency optimisation}\label{sec:multifreq}
-%% =============================================================
+\subsection{Broadband multifrequency optimisation}\label{sec:multifreq}
 
-
-
-The single-frequency designs of Sec.~\ref{sec:single_freq} are optimised at
+The designs above are optimised at
 one frequency and, being tuned to it, cloak well only in a narrow neighbourhood
 of $f^\star=2$: away from the design frequency the cloak ratio falls off
 markedly. Because the ideal triangular
@@ -928,8 +827,6 @@ tensor~\eqref{eq:Ceff} is frequency-independent and cloaks exactly at every
 frequency, this narrowness is a limitation of the single-frequency
 \emph{objective}, not of the material class. We therefore train a single design
 against a band of frequencies at once.
-
-\subsection{Band objective}\label{subsec:band_objective}
 
 The broadband loss is the average of the single-frequency magnitude-band
 integral~\eqref{eq:opt_loss_cloak} over a finite set $\mcl{S}$ of frequencies
@@ -949,37 +846,19 @@ field $\Phi_\theta$ produces the shared per-cell material, so the same design is
 required to cloak at every $f\in\mcl{S}$ simultaneously.
 
 The objective~\eqref{eq:band_loss} places no restriction on which band is
-targeted: any $\mcl{S}$ can be chosen, and the optimiser returns the best single
-realisable design over that band. The only cost is computational --- every
-optimisation step evaluates a forward and an adjoint FEM solve per frequency, so
-the per-step cost scales linearly with $|\mcl{S}|$. The frequencies are
-independent and solved in parallel across a worker pool, bounded in practice
-only by the memory of the concurrent sparse factorisations.
+targeted; the only cost is computational, since every optimisation step
+evaluates a forward and an adjoint FEM solve per frequency and the per-step
+cost therefore scales linearly with $|\mcl{S}|$.
 
-\subsection{Frequency sweep}\label{subsec:multifreq_results}
-
-We optimise the $14\times10$ design (the same $46$ in-cloak Cauchy materials and
-neural field as in Sec.~\ref{sec:single_freq}) against the band
-$f^\star\in[1,3]$, sampled at seven uniformly spaced frequencies
-$\mcl{S}=\{1.0,1.33,1.67,2.0,2.33,2.67,3.0\}$ with equal weights. The macro mesh
-is sized to resolve the shortest wavelength in the band (at $f^\star=3$) and
-reused across all frequencies. To probe generalisation beyond the training
-frequencies, the converged design is then evaluated on a dense sweep
-$f^\star\in[0,4]$ and compared against the uncloaked notch and the ideal
-continuous polar cloak on the same mesh (Fig.~\ref{fig:multifreq_sweep}).
-
-Across the training band the optimised cloak holds the cloak ratio near unity at
-every frequency: $\eta$ stays in the range $0.92$--$0.99$ with an in-band mean
-of $0.96$ and a worst case of $|1-\eta|\approx0.08$ at the lower band edge,
-where the uncloaked notch instead drops to $\eta\approx0.31$
-($|1-\eta|\approx0.69$) near mid-band. The ideal continuous cloak remains at
-$\eta\approx1$ throughout, as expected for the frequency-independent triangular
-tensor. The single design thus recovers most of the single-frequency
-performance simultaneously over the whole octave-plus band, rather than at one
-frequency only. Outside the training band the improvement degrades gracefully
---- $\eta\approx0.78$ at $f^\star=3.5$ and $\approx0.60$ at $f^\star=4.0$ ---
-confirming that the objective~\eqref{eq:band_loss} broadens the cloaking
-response over the targeted band rather than trivially across all frequencies.
+We optimise the same $14\times10$ design ($46$ in-cloak Cauchy materials)
+against the band $f^\star\in[1,3]$, sampled at seven uniformly spaced
+frequencies with equal weights, and evaluate the converged design on a dense
+sweep $f^\star\in[0,4]$ (Fig.~\ref{fig:multifreq_sweep}). The single design
+holds $\eta=0.92$--$0.99$ (mean $0.96$) across the whole training band, where
+the uncloaked notch falls to $\eta\approx0.31$, and degrades gracefully outside
+it ($\eta\approx0.78$ at $f^\star=3.5$, $\approx0.60$ at $f^\star=4.0$). One
+realisable design therefore retains most of the single-frequency performance
+over an octave-plus band rather than at one frequency only.
 
 \begin{figure}[htbp]
   \centering
@@ -1028,7 +907,11 @@ any manufacturable object. We now close the loop to an explicit, single-material
 realisation, in which every cloak cell is filled with a two-phase solid/void
 microstructure whose homogenised stiffness reproduces the optimised target, so
 that the whole cloak can be built from one constituent by varying only the
-internal pattern from cell to cell. We first constrain the neural-field
+internal pattern from cell to cell. The solid phase is concrete, taken as
+isotropic with $E=30\,\text{GPa}$, $\nu=0.2$ and
+$\rho=2300\,\text{kg}/\text{m}^3$ (plane strain), and the second phase is void;
+the cloak is cast into the soil half-space of
+Sec.~\ref{subsec:domain}. We first constrain the neural-field
 optimisation to the manifold of realisable microstructures, then compare two
 generative methods -- inverse design and conditional diffusion -- for turning
 each per-cell target into an actual microstructure, and finally exhibit and
@@ -1038,20 +921,22 @@ validate the realised cloak.
 
 \paragraph{Step 1 -- Microstructure dataset.} A catalogue of $N\sim10^{6}$
 binary $50\times50$ unit cells is generated by a squared-assembly cellular
-automaton on a solid/void substrate, following the cellular-automaton
+automaton on a concrete/void substrate, following the cellular-automaton
 generative approach of \citet{nakarmi2024}, who assemble a large,
 topologically diverse library of mesostructures by evolving a pixel grid
 under neighbour-count birth/death/survival rules.
 
 \paragraph{Step 2 -- Homogenisation.} Periodic-FEM homogenisation of each unique
-cell yields its effective orthotropic stiffness $(C_{11},C_{22},C_{12},C_{66})$
-and density $\rho_{\mathrm{eff}}$. Because the squared-assembly cells are
+cell, with the solid pixels carrying the concrete moduli above and the void
+pixels an ersatz stiffness $10^{-6}E$, yields its effective orthotropic
+stiffness $(C_{11},C_{22},C_{12},C_{66})$ and density
+$\rho_{\mathrm{eff}}=v_f\rho_{\mathrm{concrete}}$. Because the squared-assembly cells are
 invariant under the point group $D_2$, the homogenised tensor is exactly of the
 4CM form~\eqref{eq:4cm} that is the design variable throughout the paper, so the
 descriptor carries the full (orthotropic) stiffness rather than an isotropic
 projection of it.
 
-\paragraph{Step 3 -- Realisability prior.} A Gaussian mixture is fit to the
+\paragraph{Step 3 -- Realisability prior.} A Gaussian mixture is fitted to the
 standardised $(\mbf{C}_{\mathrm{4CM}},\rho)$ point cloud of the catalogue, and a
 flat-top threshold $\tau$ at the $q$-th log-density quantile defines the
 realisable manifold $\mcl{M}$.
@@ -1066,7 +951,7 @@ added to the single-frequency or band cloak loss. The penalty pulls every cell
 into $\mcl{M}$ without pinning it to a specific catalogue entry, while the
 positive-definiteness and bounded-anisotropy guarantees of
 Sec.~\ref{sec:constrained} keep every intermediate design admissible. For the
-constrained runs we move from the $14\times10$ grid of Sec.~\ref{sec:single_freq}
+constrained runs we move from the $14\times10$ grid of Sec.~\ref{subsec:final14}
 to a finer $20\times15$ grid --- which places exactly $100$ cells inside the
 cloak --- in the expectation that the extra per-cell freedom would let the
 constrained optimisation reach a good realisable solution more easily.
@@ -1089,7 +974,7 @@ homogenisation reproduces it -- but approach it from opposite directions.
 \paragraph{Inverse design (neural field).} A coordinate network parameterises a
 continuous density field over the $50\times50$ cell; it is relaxed during
 training and driven to a binary pattern through a soft-to-hard schedule, with a
-connectivity penalty that suppresses disconnected cement islands and floating
+connectivity penalty that suppresses disconnected concrete islands and floating
 voids. The cell's periodic-FEM homogenised stiffness is differentiable in the
 network weights, so the pattern is optimised directly against the per-cell target
 error. The method is deterministic and returns a single, locally optimal cell for
@@ -1185,9 +1070,9 @@ field.
 \subsection{Realised cloak and validation}\label{subsec:micro_realisation}
 
 Figure~\ref{fig:micro_tiling} shows the explicit solid/void realisation of the
-cloak: the $100$ generated $50\times50$ cells tiled at the macro-cell positions
+cloak: the $100$ generated cells tiled at the macro-cell positions
 they occupy inside the triangular carpet, with the surface notch and the
-surrounding half-space. The whole cloak is a single cement phase perforated by a
+surrounding soil half-space. The whole cloak is a single concrete phase perforated by a
 cell-varying void pattern, densest near the outer boundary and most strongly
 perforated near the sheared defect tip, mirroring the depth variation of the
 ideal tensor~\eqref{eq:Ceff}.
@@ -1207,25 +1092,18 @@ ideal tensor~\eqref{eq:Ceff}.
     \label{fig:micro_tiling_inv}
   \end{subfigure}
   \caption{Explicit realisation of the triangular carpet cloak from a single
-  cement phase: the $100$ generated $50\times50$ unit cells tiled at the
-  macro-cell positions they occupy in the cloak. Cement is dark, void white; the
+  concrete phase: the $100$ generated $50\times50$ unit cells tiled at the
+  macro-cell positions they occupy in the cloak. Concrete is dark, void white; the
   black inverted triangle is the surface notch and the light grey region is the
-  surrounding half-space. (a)~Best-of-$N$ diffusion and (b)~neural-field inverse
+  surrounding soil half-space. (a)~Best-of-$N$ diffusion and (b)~neural-field inverse
   design produce visibly different but equally manufacturable patterns for the
   same optimised per-cell targets.}
   \label{fig:micro_tiling}
 \end{figure}
 
-\paragraph{On pixel-level validation.} Because the cloak satisfies strong scale
-separation --- the Rayleigh wavelength spans
-$S=\lambda_R/\delta\approx190$--$600$ micro-pixels --- asymptotic homogenisation
-implies that a mesh-converged, pixel-resolved solve of the full cloak would
-reproduce the homogenised cloak ratio to within
-$\mcl{O}\bigl((d_{\mathrm{cell}}/\lambda_R)^2\bigr)\approx2\%$. The matched
-homogenised $\eta$ of Table~\ref{tab:micro_methods} is therefore the physically
-relevant metric. We therefore validate at the unit-cell level, where each
-generated cell reproduces its target stiffness under the same periodic-FEM
-homogenisation used to build the catalogue.
+\paragraph{Pixel-level validation.} 
+
+TODO: Add pixel-level validation details.
 
 %% =============================================================
 \section{Discussion}\label{sec:discussion}
@@ -1266,7 +1144,7 @@ place. A direct full-domain pixel simulation is left to future work
 neural field to a finite-element solver, applies to other Rayleigh-wave
 design problems beyond carpet cloaking, such as wave focusing,
 waveguiding, and vibration isolation, by changing only the objective. On
-the realizability side, we have already replaced the discrete database
+the realisability side, we have already replaced the discrete database
 with a differentiable generative model of the realisable manifold,
 queried during optimisation (a guided diffusion model in the spirit
 of~\citet{yang2024}); this model still generates one unit cell at a
