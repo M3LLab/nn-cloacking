@@ -31,6 +31,7 @@ import argparse
 import os
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -137,6 +138,75 @@ def _tile_image(geoms: np.ndarray, n_x: int, n_y: int) -> np.ndarray:
     return canvas
 
 
+# ── solid-phase (micro-scale) material ──────────────────────────────
+
+
+class SolidPhase(NamedTuple):
+    """Material of the *solid* pixels of the microstructure.
+
+    This is NOT the macro background material. The half-space in which the
+    cloak is buried is soil (``material.rho0``/``material.cs`` in the config,
+    typically ρ=1600, c_s=300 → λ=μ=1.44e8 Pa), whereas the dataset's
+    homogenised stiffnesses were computed with a *cement* solid phase
+    (E=30 GPa, ν=0.2, ρ=2300). Assigning the background material to solid
+    pixels makes the tiled cloak ~87× too soft in μ and turns it into a giant
+    soft scatterer, so the solid phase must be taken from the dataset.
+    """
+    E: float
+    nu: float
+    rho: float
+
+    @property
+    def lame(self) -> tuple[float, float]:
+        """Plane-strain (λ, μ)."""
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        return lam, mu
+
+    def __str__(self) -> str:
+        lam, mu = self.lame
+        return (f"E={self.E:.4g} Pa, ν={self.nu:.3g}, ρ={self.rho:.4g} kg/m³ "
+                f"(plane-strain λ={lam:.4g}, μ={mu:.4g})")
+
+
+# Fallback matching dataset/cellular_chiral/bulk_stiffness.py's cement defaults,
+# used only when the HDF5 carries no provenance attributes.
+DEFAULT_SOLID_PHASE = SolidPhase(E=30e9, nu=0.2, rho=2300.0)
+
+# Attribute aliases written by the various dataset generators.
+_SOLID_ATTR_ALIASES = {
+    "E":   ("E_cement", "E_solid"),
+    "nu":  ("nu", "nu_micro"),
+    "rho": ("rho_solid", "rho_cement"),
+}
+
+
+def read_solid_phase(dataset_h5: Path) -> SolidPhase:
+    """Read the solid-phase material the dataset was homogenised with.
+
+    Falls back to ``DEFAULT_SOLID_PHASE`` (with a warning) for any attribute the
+    file doesn't carry, so older datasets still validate against cement rather
+    than silently against the soil background.
+    """
+    found: dict[str, float] = {}
+    with h5py.File(dataset_h5, "r") as f:
+        attrs = dict(f.attrs)
+    for key, aliases in _SOLID_ATTR_ALIASES.items():
+        for a in aliases:
+            if a in attrs:
+                found[key] = float(attrs[a])
+                break
+    missing = [k for k in _SOLID_ATTR_ALIASES if k not in found]
+    if missing:
+        print(f"  WARNING: {dataset_h5} has no {missing} attribute(s); "
+              f"falling back to cement defaults for those.")
+    return SolidPhase(
+        E=found.get("E", DEFAULT_SOLID_PHASE.E),
+        nu=found.get("nu", DEFAULT_SOLID_PHASE.nu),
+        rho=found.get("rho", DEFAULT_SOLID_PHASE.rho),
+    )
+
+
 # ── pixel-level FEM problem ─────────────────────────────────────────
 
 
@@ -144,9 +214,15 @@ class PixelMaterialProblem(RayleighCloakProblem):
     """Same elastodynamics as ``RayleighCloakProblem`` but with C(x), ρ(x) read
     from a binary canvas inside the cloak.
 
+    Inside the cloak a pixel is either the microstructure's solid phase
+    (cement, ``_C_solid``/``_rho_solid``) or void; outside it is the background
+    half-space (``_C0``/``_rho0``, soil).
+
     Required class attributes (set by the factory below):
         _canvas_jnp     : jnp.ndarray (H_pix, W_pix) of 0/1
         _cloak_bbox     : (x_min, x_max, y_min, y_max) — physical extent of canvas
+        _C_solid        : (2,2,2,2) jnp tensor for the solid phase
+        _rho_solid      : float density for the solid phase
         _C_void         : (2,2,2,2) jnp tensor for void
         _rho_void       : float density for void
     """
@@ -158,6 +234,8 @@ class PixelMaterialProblem(RayleighCloakProblem):
         canvas = type(self)._canvas_jnp                  # (H_pix, W_pix) jnp
         x_min, x_max, y_min, y_max = type(self)._cloak_bbox
         H_pix, W_pix = canvas.shape
+        C_solid = type(self)._C_solid
+        rho_solid = type(self)._rho_solid
         C_void = type(self)._C_void
         rho_void = type(self)._rho_void
         xi_fn = type(self).__dict__["_xi_fn"]
@@ -178,13 +256,13 @@ class PixelMaterialProblem(RayleighCloakProblem):
         def _C_eff_pt(x):
             in_clk = geo.in_cloak(x)
             is_solid = _pixel_at(x) > 0.5
-            C_pixel = jnp.where(is_solid, C0, C_void)
+            C_pixel = jnp.where(is_solid, C_solid, C_void)
             return jnp.where(in_clk, C_pixel, C0)
 
         def _rho_eff_pt(x):
             in_clk = geo.in_cloak(x)
             is_solid = _pixel_at(x) > 0.5
-            rho_pixel = jnp.where(is_solid, rho0, rho_void)
+            rho_pixel = jnp.where(is_solid, rho_solid, rho_void)
             return jnp.where(in_clk, rho_pixel, rho0)
 
         xi_qp = jax.vmap(jax.vmap(xi_fn))(self.physical_quad_points)
@@ -209,11 +287,24 @@ def build_pixel_problem(
     canvas: np.ndarray,
     cloak_bbox: tuple[float, float, float, float],
     void_ratio: float = 1e-6,
+    solid: SolidPhase | None = None,
 ) -> PixelMaterialProblem:
-    """Same plumbing as ``build_problem`` but inserts pixel-level material."""
-    C0 = C_iso(params.lam, params.mu)
-    C_void = C_iso(params.lam * void_ratio, params.mu * void_ratio)
-    rho_void = params.rho0 * void_ratio
+    """Same plumbing as ``build_problem`` but inserts pixel-level material.
+
+    ``solid`` is the microstructure's solid phase — the material the dataset was
+    homogenised with (cement), NOT the background half-space (soil). Pass the
+    value from :func:`read_solid_phase` so it can't drift from the dataset in
+    use; defaults to cement rather than to the background, since matching a
+    cement-homogenised dataset and then simulating soil pixels is never right.
+    """
+    if solid is None:
+        solid = DEFAULT_SOLID_PHASE
+    lam_s, mu_s = solid.lame
+
+    C0 = C_iso(params.lam, params.mu)                     # background (soil)
+    C_solid = C_iso(lam_s, mu_s)                          # microstructure solid
+    C_void = C_iso(lam_s * void_ratio, mu_s * void_ratio)  # ersatz void
+    rho_void = solid.rho * void_ratio
     canvas_jnp = jnp.asarray(canvas, dtype=jnp.float32)
 
     ProblemCls = type("PixelMaterialProblemInstance", (PixelMaterialProblem,), {
@@ -234,6 +325,8 @@ def build_pixel_problem(
         "_mu_param":     params.mu,
         "_canvas_jnp":   canvas_jnp,
         "_cloak_bbox":   cloak_bbox,
+        "_C_solid":      C_solid,
+        "_rho_solid":    solid.rho,
         "_C_void":       C_void,
         "_rho_void":     rho_void,
     })
@@ -554,9 +647,11 @@ def run_validated_sweep(
     void_ratio: float,
     csv_path: Path,
     solver_opts: dict,
+    solid: SolidPhase,
 ) -> None:
     """Sweep validated case: pixel-material cloak, refined mesh."""
     print(f"\n>>> Validated sweep ({len(f_stars)} freqs, refinement={refinement_factor})")
+    print(f"    solid phase: {solid}")
     ratios = []
     for f_star in f_stars:
         t0 = time.time()
@@ -575,6 +670,7 @@ def run_validated_sweep(
         problem = build_pixel_problem(
             cloak_mesh, config, dp, geometry,
             canvas=canvas, cloak_bbox=cloak_bbox, void_ratio=void_ratio,
+            solid=solid,
         )
         sol_list = jax_fem_solver(problem, solver_options=solver_opts)
         u_val = np.asarray(sol_list[0])
@@ -674,7 +770,20 @@ def main() -> None:
                         "for pixel validation but sufficient for the "
                         "homogenised optimisation.")
     p.add_argument("--void-ratio", type=float, default=1e-6,
-                   help="E_void / E_cement ratio for ersatz-material void.")
+                   help="E_void / E_solid ratio for ersatz-material void.")
+    p.add_argument("--solid-E", type=float, default=None,
+                   help="Young's modulus of the microstructure's SOLID phase. "
+                        "Defaults to the dataset's own 'E_cement'/'E_solid' "
+                        "attribute (cement, 30 GPa). This is deliberately NOT "
+                        "the background half-space (soil) — the dataset's "
+                        "homogenised stiffnesses assume a cement solid, so "
+                        "tiling soil pixels would make the cloak ~87x too soft.")
+    p.add_argument("--solid-nu", type=float, default=None,
+                   help="Poisson's ratio of the solid phase (default: dataset "
+                        "attribute 'nu', 0.2).")
+    p.add_argument("--solid-rho", type=float, default=None,
+                   help="Density of the solid phase (default: dataset attribute "
+                        "'rho_solid'/'rho_cement', 2300 kg/m^3).")
     p.add_argument("--rho-weight", type=float, default=1.0,
                    help="Weight on standardised ρ in the matching distance.")
     p.add_argument("--feature-weights", type=str, default=None,
@@ -746,6 +855,20 @@ def main() -> None:
         f"{['%.3g' % v for v in diag['feature_weights']]}"
     )
 
+    # Solid phase of the tiled microstructure — read from the dataset so it
+    # always matches what the homogenised (C, ρ) in the matching were computed
+    # with, overridable per-component from the CLI.
+    solid = read_solid_phase(Path(args.dataset))
+    solid = SolidPhase(
+        E=solid.E if args.solid_E is None else float(args.solid_E),
+        nu=solid.nu if args.solid_nu is None else float(args.solid_nu),
+        rho=solid.rho if args.solid_rho is None else float(args.solid_rho),
+    )
+    _dp0 = DerivedParams.from_config(base_config)
+    print(f"solid phase (microstructure): {solid}")
+    print(f"background half-space:        λ={_dp0.lam:.4g}, μ={_dp0.mu:.4g}, "
+          f"ρ={_dp0.rho0:.4g}")
+
     solver_opts = {
         "petsc_solver": {
             "ksp_type": base_config.solver.ksp_type,
@@ -782,6 +905,7 @@ def main() -> None:
                 void_ratio=args.void_ratio,
                 csv_path=csv_paths["validated"],
                 solver_opts=solver_opts,
+                solid=solid,
             )
 
     # Plot all available cases together.
