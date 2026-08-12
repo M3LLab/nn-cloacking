@@ -87,6 +87,17 @@ def petsc_solve(A, b, ksp_type, pc_type):
     if ksp_type == 'tfqmr':
         ksp.pc.setFactorSolverType('mumps')
 
+    # [cloak patch] Route direct factorisations through MUMPS when it
+    # is available: nested-dissection ordering gives far lower fill (memory) than
+    # PETSc's native LU on the large 2-D cloak meshes. Falls back silently to the
+    # native solver if this PETSc was built without MUMPS.
+    if pc_type in ('lu', 'cholesky'):
+        try:
+            ksp.pc.setFactorSolverType('mumps')
+            ksp.pc.setUp()
+        except Exception:
+            pass
+
     logger.debug(f'PETSc Solver - Solving linear system with ksp_type = {ksp.getType()}, pc = {ksp.pc.getType()}')
     x = PETSc.Vec().createSeq(len(b))
     ksp.solve(rhs, x)
@@ -379,7 +390,9 @@ def get_A(problem):
 
     for ind, fe in enumerate(problem.fes):
         for i in range(len(fe.node_inds_list)):
-            row_inds = onp.array(fe.node_inds_list[i] * fe.vec + fe.vec_inds_list[i] + problem.offset[ind], dtype=onp.int32)
+            # PETSc.IntType, not a hardcoded int32: on a 64-bit-index PETSc build
+            # the rows array must match PetscInt (int64) or petsc4py has to recast it.
+            row_inds = onp.array(fe.node_inds_list[i] * fe.vec + fe.vec_inds_list[i] + problem.offset[ind], dtype=PETSc.IntType)
             A.zeroRows(row_inds)
 
     # Linear multipoint constraints
@@ -522,7 +535,22 @@ def solver(problem, solver_options={}):
     rel_tol = solver_options['rel_tol'] if 'rel_tol' in solver_options else 1e-8
     tol = solver_options['tol'] if 'tol' in solver_options else 1e-6
 
-    def newton_update_helper(dofs):
+    # [cloak patch] Assemble the Jacobian only when it will actually be
+    # USED. The stock loop called get_A() again immediately after every update just
+    # to run the convergence check, then discarded that matrix. get_A() is the
+    # expensive half of an iteration (scipy CSR build + PETSc createAIJ + the
+    # zeroRows loop), so on a linear problem -- one Newton step -- this doubled it
+    # for nothing. Now the post-update call computes the residual only, and A is
+    # rebuilt lazily iff the check says another step is needed. Nonlinear
+    # behaviour is unchanged: every iteration that runs still gets a fresh A.
+    #
+    # solver_options['linear'] = True goes further and skips the post-update
+    # residual assembly entirely: for an affine r(u) the single Newton step is
+    # exact by construction. The linear solve is still verified -- petsc_solve()
+    # asserts ||Ax-b||/||b|| < 1e-4 before returning.
+    linear = bool(solver_options.get('linear', False))
+
+    def newton_update_helper(dofs, need_A=True):
         if hasattr(problem, 'P_mat'):
             dofs = problem.P_mat @ dofs
 
@@ -534,8 +562,7 @@ def solver(problem, solver_options={}):
         if hasattr(problem, 'P_mat'):
             res_vec = problem.P_mat.T @ res_vec
 
-        A = get_A(problem)
-        return res_vec, A
+        return res_vec, (get_A(problem) if need_A else None)
 
     res_vec, A = newton_update_helper(dofs)
     res_val = np.linalg.norm(res_vec)
@@ -544,12 +571,17 @@ def solver(problem, solver_options={}):
     logger.debug(f"Before, l_2 res = {res_val}, relative l_2 res = {rel_res_val}")
     while (rel_res_val > rel_tol) and (res_val > tol):
         dofs = linear_incremental_solver(problem, res_vec, A, dofs, solver_options)
-        res_vec, A = newton_update_helper(dofs)
+        if linear:
+            logger.debug("Linear problem: exact in one step, skipping re-assembly.")
+            break
+        res_vec, _ = newton_update_helper(dofs, need_A=False)
         # logger.debug(f"DEBUG: l_2 res = {np.linalg.norm(apply_bc_vec(A @ dofs, dofs, problem))}")
         res_val = np.linalg.norm(res_vec)
         rel_res_val = res_val/res_val_initial
 
         logger.debug(f"l_2 res = {res_val}, relative l_2 res = {rel_res_val}")
+        if (rel_res_val > rel_tol) and (res_val > tol):
+            A = get_A(problem)      # another step is coming -> assemble it now
 
     assert np.all(np.isfinite(res_val)), f"res_val contains NaN, stop the program!"
     assert np.all(np.isfinite(dofs)), f"dofs contains NaN, stop the program!"

@@ -424,6 +424,20 @@ def generate_mesh_full(
     return Mesh(points, cells, ele_type=cfg.mesh.ele_type)
 
 
+def _finalize_submesh(mesh: Mesh, cells_sub: np.ndarray) -> tuple[Mesh, np.ndarray]:
+    """Drop orphan nodes from ``cells_sub`` and renumber. Shared tail of the
+    ``extract_*`` helpers. Returns ``(submesh, kept_nodes)`` where ``kept_nodes``
+    maps submesh node i -> original index (so ``u_full[kept_nodes]`` restricts a
+    full-mesh field to the submesh)."""
+    points = np.asarray(mesh.points)
+    kept_nodes = np.unique(cells_sub)
+    new_points = points[kept_nodes]
+    old_to_new = np.full(len(points), -1, dtype=int)
+    old_to_new[kept_nodes] = np.arange(len(kept_nodes))
+    new_cells = old_to_new[cells_sub]
+    return Mesh(new_points, new_cells, ele_type=mesh.ele_type), kept_nodes
+
+
 def extract_submesh(
     mesh: Mesh,
     geometry: CloakGeometry,
@@ -455,13 +469,123 @@ def extract_submesh(
         not bool(geometry.in_defect(jnp.array(c)))
         for c in centroids
     ])
-    cells_sub = cells[keep]
+    return _finalize_submesh(mesh, cells[keep])
 
-    # Remove orphan nodes and renumber
-    kept_nodes = np.unique(cells_sub)
-    new_points = points[kept_nodes]
-    old_to_new = np.full(len(points), -1, dtype=int)
-    old_to_new[kept_nodes] = np.arange(len(kept_nodes))
-    new_cells = old_to_new[cells_sub]
 
-    return Mesh(new_points, new_cells, ele_type=mesh.ele_type), kept_nodes
+def _keep_boundary_connected(
+    points: np.ndarray,
+    cells: np.ndarray,
+    keep: np.ndarray,
+    domain_bbox: tuple[float, float, float, float] | None,
+) -> np.ndarray:
+    """Drop kept elements that form solid islands disconnected from the domain
+    boundary.
+
+    Cutting void pores out of the cloak can leave a lump of cement fully ringed
+    by void. Such a lump is only connected to the rest of the mesh through shared
+    nodes; if none of those nodes lie on a Dirichlet (PML) edge, the lump carries
+    a rigid-body null space that makes the direct factorisation singular. We
+    build the node connectivity graph over the kept elements, find its connected
+    components, and keep only components that touch the outer domain rectangle.
+
+    Returns an updated boolean ``keep`` mask (same length as ``cells``).
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    kept_cells = cells[keep]
+    if kept_cells.size == 0:
+        return keep
+
+    n_pts = len(points)
+    # Star each element: connect its first node to the others. Union over all
+    # kept elements yields one component per connected solid region.
+    ncol = kept_cells.shape[1]
+    r = np.concatenate([kept_cells[:, 0]] * (ncol - 1))
+    c = np.concatenate([kept_cells[:, j] for j in range(1, ncol)])
+    adj = coo_matrix((np.ones(len(r), np.int8), (r, c)), shape=(n_pts, n_pts))
+    adj = adj + adj.T
+    _, labels = connected_components(adj, directed=False)
+
+    if domain_bbox is None:
+        domain_bbox = (points[:, 0].min(), points[:, 0].max(),
+                       points[:, 1].min(), points[:, 1].max())
+    x0, x1, y0, y1 = domain_bbox
+    tol = 1e-9 * max(x1 - x0, y1 - y0, 1.0)
+    used = np.unique(kept_cells)
+    px, py = points[used, 0], points[used, 1]
+    on_bdry = ((np.abs(px - x0) < tol) | (np.abs(px - x1) < tol)
+               | (np.abs(py - y0) < tol) | (np.abs(py - y1) < tol))
+    anchored = np.unique(labels[used[on_bdry]])
+
+    cell_ok = np.isin(labels[cells[:, 0]], anchored)
+    return keep & cell_ok
+
+
+def extract_solid_submesh(
+    mesh: Mesh,
+    geometry: CloakGeometry,
+    canvas: np.ndarray,
+    cloak_bbox: tuple[float, float, float, float],
+    *,
+    drop_islands: bool = True,
+    domain_bbox: tuple[float, float, float, float] | None = None,
+) -> tuple[Mesh, np.ndarray]:
+    """Mesh only the solid cement: cut out the defect **and** the void pores.
+
+    Like :func:`extract_submesh` (which removes only the hidden-defect elements),
+    but ALSO removes every element whose centroid falls in a **void** pixel of the
+    tiled cloak ``canvas`` (``0`` = void pore, ``>0`` = solid cement). The pores
+    become genuine holes with **traction-free** boundaries — the physically
+    correct model of a void in an elastic solid, and the standard way to mesh a
+    perforated / auxetic microstructure (only the solid phase is discretised).
+
+    This is the alternative to the weak-material "ersatz" fill (``void_ratio``),
+    which meshes the empty space and models each pore as a phantom medium with the
+    *same wave speed* as cement (both C and rho scaled by the same factor) but
+    near-zero impedance. That fill both wastes ~half the elements and seeds
+    spurious low-stiffness localised modes that pollute the surface metric
+    (``max|u|/p95`` blows up). Cutting the pores out removes both problems.
+
+    Parameters
+    ----------
+    canvas : (H, W) uint8, y-DOWN (row 0 = top = ``y_max``), matching
+        ``run_validation._tile_binary`` / ``PixelMaterialProblem._pixel_at``.
+    cloak_bbox : ``(x_min, x_max, y_min, y_max)`` that ``canvas`` spans.
+    drop_islands : also drop cement islands left disconnected from the domain
+        boundary (see :func:`_keep_boundary_connected`); on by default because
+        such islands make the direct solve singular.
+    domain_bbox : outer rectangle used to anchor the island check; defaults to
+        the mesh bounding box (the extended PML rectangle).
+
+    Returns ``(submesh, kept_nodes)`` exactly like :func:`extract_submesh`.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    points = np.asarray(mesh.points)
+    cells = np.asarray(mesh.cells)
+    centroids = points[cells].mean(axis=1)  # (n_elem, 2)
+
+    # Region membership (batched — one vmap call, not a Python loop per element).
+    cj = jnp.asarray(centroids)
+    in_defect = np.asarray(jax.vmap(geometry.in_defect)(cj)).astype(bool)
+    in_cloak = np.asarray(jax.vmap(geometry.in_cloak)(cj)).astype(bool)
+
+    # Pixel lookup — identical orientation to PixelMaterialProblem._pixel_at.
+    x_min, x_max, y_min, y_max = cloak_bbox
+    canvas = np.asarray(canvas)
+    H, W = canvas.shape
+    xn = (centroids[:, 0] - x_min) / (x_max - x_min)
+    yn = (centroids[:, 1] - y_min) / (y_max - y_min)
+    col = np.clip((xn * W).astype(np.int64), 0, W - 1)
+    row = np.clip(((1.0 - yn) * H).astype(np.int64), 0, H - 1)
+    solid_pixel = canvas[row, col] > 0.5
+
+    is_void_pore = in_cloak & (~solid_pixel)     # a pore inside the cloak
+    keep = (~in_defect) & (~is_void_pore)
+
+    if drop_islands:
+        keep = _keep_boundary_connected(points, cells, keep, domain_bbox)
+
+    return _finalize_submesh(mesh, cells[keep])

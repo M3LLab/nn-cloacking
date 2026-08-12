@@ -21,8 +21,55 @@ from pydantic import BaseModel, model_validator
 
 
 class MaterialConfig(BaseModel):
+    """Background half-space — the soil the cloak is buried in."""
     rho0: float = 1600.0
     cs: float = 300.0
+
+
+class MicroMaterialConfig(BaseModel):
+    """Solid phase of the cloak microstructure (cement) — NOT the background.
+
+    The generated cells are *perforations of this material*, so the pixel-level
+    validation has to put it in the ligaments; the surrounding half-space and the
+    PML stay :class:`MaterialConfig` (soil). Getting this wrong is not a small
+    error: the homogenised cell stiffnesses shipped in
+    ``data/optimized_params.npz`` / ``cell_designs_*/weights.npz`` reach
+    ``C11 ~ 3.5e9 Pa``, while a perforated solid is bounded by
+    ``C_eff <= vf * C_solid``. With soil (``C11 = 4.32e8``) every one of the 100
+    cloak cells violates that bound by 2.2-15.9x — the designs are simply
+    unreachable — and the cloak comes out ~7x too soft, i.e. *softer* than its own
+    surroundings when the design calls for stiffer.
+
+    Consumed by ``run_validation.build_solid_problem``. The design pipeline reads
+    the same three constants from ``TopoNeuralConfig.E_cement / nu_micro /
+    rho_cement``; keep the two in sync.
+
+    ``enabled: false`` restores the old single-material behaviour (soil in the
+    ligaments) for A/B comparison only — it does not model anything physical.
+    """
+    enabled: bool = True
+    E: float = 30e9        # Pa, Young's modulus of the solid phase
+    nu: float = 0.2        # Poisson's ratio of the solid phase
+    rho: float = 2300.0    # kg/m^3, density of the solid phase
+
+    @property
+    def mu(self) -> float:
+        return self.E / (2.0 * (1.0 + self.nu))
+
+    @property
+    def lam(self) -> float:
+        """Plane-strain first Lamé parameter (matches ``DerivedParams``)."""
+        return self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.E <= 0 or self.rho <= 0:
+            raise ValueError(f"material_micro: E and rho must be > 0; got E={self.E}, rho={self.rho}")
+        if not -1.0 < self.nu < 0.5:
+            raise ValueError(
+                f"material_micro: nu must be in (-1, 0.5) for a positive-definite "
+                f"plane-strain C; got {self.nu}")
+        return self
 
 
 class DomainConfig(BaseModel):
@@ -91,7 +138,7 @@ class MeshConfig(BaseModel):
     # macro cell) instead of a graded field, intended together with
     # ``ele_type: TRI6`` (quadratic) for low-dispersion macro solves. The
     # builder honours ``ele_type`` for both TRI3 and TRI6.
-    builder: Literal["legacy", "uniform_tri6"] = "legacy"
+    builder: Literal["legacy", "uniform_tri6", "uniform_cloak"] = "legacy"
 
 
 class SourceConfig(BaseModel):
@@ -373,6 +420,7 @@ class SimulationConfig(BaseModel):
     symmetrize_cloak: bool = False
 
     material: MaterialConfig = MaterialConfig()
+    material_micro: MicroMaterialConfig = MicroMaterialConfig()
     domain: DomainConfig = DomainConfig()
     geometry: TriangularCloakConfig = TriangularCloakConfig()
     circular_geometry: CircularCloakConfig = CircularCloakConfig()

@@ -41,6 +41,39 @@ Other folders:
 - `docs/` — theory notes and figures.
 - `tests/` — diagnostic tests and scripts.
 - `output/` — generated mesh/results/plots.
+- `patches/solver.py` — our patched copy of `jax_fem/solver.py`. The `jax-fem/`
+  checkout itself is gitignored, so this is the tracked original; copy it over
+  after re-cloning jax-fem.
+- `design-validation/` — **git submodule**, the pixel-level FEM validation rig.
+
+### The design-validation submodule
+
+`design-validation` ([M3LLab/design-validation](https://github.com/M3LLab/design-validation))
+takes a finished design and re-solves it with material assigned per *pixel*
+rather than per homogenised cell — the exact check the homogenised design only
+approximates. It is a separate repo because it has to clone and run standalone
+on a big validation machine, with its own PETSc/MUMPS build.
+
+```bash
+git clone --recurse-submodules git@github.com:M3LLab/nn-cloaking.git
+# or, in an existing checkout:
+git submodule update --init
+```
+
+It carries copies of `rayleigh_cloak/`, `patches/solver.py` and
+`rayleigh_cloak_3d/cudss_solver.py` under its `vendor/`, so that a standalone
+clone needs nothing from here. **This repo is the source of truth for all
+three** — fix them here, then refresh the copies:
+
+```bash
+cd design-validation
+python tools/sync_vendor.py           # parent -> vendor/
+python tools/sync_vendor.py --check   # fail if vendor/ has drifted
+```
+
+The direction is one-way. `install.sh` over there runs `--check`, so drift
+fails the install instead of going unnoticed — which is how the two versions
+silently forked for months before the trees were merged.
 
 ## What changed relative to the older layout
 

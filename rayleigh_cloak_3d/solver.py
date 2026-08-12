@@ -56,16 +56,22 @@ def _petsc_opts(cfg: SimulationConfig3D) -> dict:
 def _solver_opts_pair(cfg: SimulationConfig3D) -> tuple[dict, dict]:
     """Return (forward_opts, adjoint_opts) dicts for the configured backend.
 
-    For the cuDSS backend the adjoint options carry ``_is_adjoint=True`` so
-    the custom solver knows to apply the J-trick (sign-flip of imaginary
-    DOFs on both sides of the solve) and reuse the forward factorisation
-    — key to fitting a full AD step into the 2 min/iter budget.
+    For the cuDSS backend the adjoint options carry ``_is_adjoint=True``. With
+    ``cudss_signflip_adjoint`` the custom solver then applies the J-trick
+    (sign-flip of imaginary DOFs on both sides of the solve) and reuses the
+    forward factorisation — key to fitting a full AD step into the 2 min/iter
+    budget. Off by default; otherwise forward and adjoint each get their own
+    persistent solver, which costs a second factorisation and a second factor
+    in VRAM (``cudss_exclusive_gpu`` trades that VRAM back for re-planning).
     """
     if cfg.solver.backend == "cudss":
         from rayleigh_cloak_3d.cudss_solver import make_forward_and_adjoint
         return make_forward_and_adjoint({
             "hybrid_memory": cfg.solver.cudss_hybrid_memory,
             "verbose": cfg.solver.cudss_verbose,
+            "signflip_adjoint": cfg.solver.cudss_signflip_adjoint,
+            "exclusive_gpu": cfg.solver.cudss_exclusive_gpu,
+            "vec": 6,   # 3D: (ux,uy,uz) x (Re,Im) per node -> J flips the Im half
         })
     opts = _petsc_opts(cfg)
     return opts, opts

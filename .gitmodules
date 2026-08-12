@@ -1,0 +1,3 @@
+[submodule "design-validation"]
+	path = design-validation
+	url = git@github.com:M3LLab/design-validation.git

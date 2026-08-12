@@ -19,6 +19,7 @@ from rayleigh_cloak.geometry.triangular import TriangularCloakGeometry
 from rayleigh_cloak.materials import C_iso, CellMaterial
 from rayleigh_cloak import mesh as _legacy_mesh
 from rayleigh_cloak import mesh_uniform as _uniform_mesh
+from rayleigh_cloak import mesh_cloak_uniform as _cloak_uniform_mesh
 from rayleigh_cloak.mesh import extract_submesh
 from rayleigh_cloak.optimize import (
     OptimizationResult,
@@ -88,12 +89,17 @@ def _petsc_opts(config: SimulationConfig) -> dict:
 def _mesh_module(config: SimulationConfig):
     """Select the mesh builder module from ``config.mesh.builder``.
 
-    ``"uniform_tri6"`` -> :mod:`rayleigh_cloak.mesh_uniform` (uniform-in-cloak,
-    honours ``ele_type`` TRI3/TRI6); anything else -> the legacy graded builder
-    :mod:`rayleigh_cloak.mesh`. Default is legacy, so existing runs are unchanged.
+    ``"uniform_tri6"`` -> :mod:`rayleigh_cloak.mesh_uniform` (uniform over the
+    cloak *bounding box*); ``"uniform_cloak"`` ->
+    :mod:`rayleigh_cloak.mesh_cloak_uniform` (uniform over the cloak *annulus*
+    only, outside unchanged — the builder to use for pixel-level runs); anything
+    else -> the legacy graded builder :mod:`rayleigh_cloak.mesh`. Default is
+    legacy, so existing runs are unchanged.
     """
     if config.mesh.builder == "uniform_tri6":
         return _uniform_mesh
+    if config.mesh.builder == "uniform_cloak":
+        return _cloak_uniform_mesh
     return _legacy_mesh
 
 

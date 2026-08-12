@@ -63,9 +63,16 @@ class SolverConfig(BaseModel):
     ksp_type: str = "preonly"
     pc_type: str = "lu"
     pc_factor_mat_solver_type: str = ""   # e.g. "mumps" for large 3D
-    # cuDSS options (used when backend == 'cudss').
+    # cuDSS options (used when backend == 'cudss'). See rayleigh_cloak_3d.cudss_solver.
     cudss_hybrid_memory: bool = False
     cudss_verbose: bool = True
+    # Reuse the forward factor for the adjoint via J A J = A^T. Halves adjoint
+    # wall time and VRAM. Valid for this 3D vec=6 operator; the 2D vec=4
+    # validation problem must leave it off (measured 4.6e-3 rel err there).
+    cudss_signflip_adjoint: bool = False
+    # Hold at most one factor in VRAM. Alternative to the sign-flip when the
+    # forward and adjoint factors cannot coexist on the card.
+    cudss_exclusive_gpu: bool = False
 
 
 class CellConfig(BaseModel):

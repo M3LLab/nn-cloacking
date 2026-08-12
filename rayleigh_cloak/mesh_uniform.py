@@ -141,15 +141,23 @@ def generate_mesh(
     cfg: SimulationConfig,
     params: DerivedParams,
     geometry: CloakGeometry,
+    cloak_field_fn=None,
 ) -> Mesh:
     """Uniform-in-cloak / TRI6 analogue of :func:`rayleigh_cloak.mesh.generate_mesh`.
 
     Builds a triangular mesh of the full domain with the defect cut out (unless
     ``cfg.is_reference``). The cloak refinement is uniform ``h_in`` across the
     cloak bbox instead of the legacy graded field.
+
+    ``cloak_field_fn(geometry, h_in, h_out) -> field_tag`` overrides how the cloak
+    size field is built; it defaults to the uniform-over-the-bbox ``Box`` field.
+    :mod:`rayleigh_cloak.mesh_cloak_uniform` passes a field that is uniform over
+    the cloak *annulus* only.
     """
     p = params
     h_elem, h_in, h_out, h_surf = _resolve_mesh_sizes(cfg, p)
+    if cloak_field_fn is None:
+        cloak_field_fn = _add_uniform_cloak_field
 
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 1)
@@ -187,7 +195,7 @@ def generate_mesh(
             geo, (p1, p2, p3, p4), h_in, h_elem, h_outside=h_out,
             top_eval_xs=top_eval_xs, h_surf=h_surf,
         )
-        cloak_field = _add_uniform_cloak_field(geometry, h_in, h_out)
+        cloak_field = cloak_field_fn(geometry, h_in, h_out)
 
     f_thresh_surf = _add_surface_field(p, top_lines, h_surf, h_out)
     _compose_background(cfg, cloak_field, f_thresh_surf)
@@ -200,6 +208,7 @@ def generate_mesh_full(
     cfg: SimulationConfig,
     params: DerivedParams,
     geometry: CloakGeometry,
+    cloak_field_fn=None,
 ) -> Mesh:
     """Uniform-in-cloak / TRI6 analogue of
     :func:`rayleigh_cloak.mesh.generate_mesh_full`.
@@ -207,9 +216,13 @@ def generate_mesh_full(
     Full-domain mesh (no defect cutout) with the cloak vertices embedded and a
     uniform ``h_in`` over the cloak bbox. Pair with ``extract_submesh`` for the
     cloak solve, exactly as in the legacy pipeline.
+
+    See :func:`generate_mesh` for ``cloak_field_fn``.
     """
     p = params
     h_elem, h_in, h_out, h_surf = _resolve_mesh_sizes(cfg, p)
+    if cloak_field_fn is None:
+        cloak_field_fn = _add_uniform_cloak_field
 
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 1)
@@ -247,7 +260,7 @@ def generate_mesh_full(
             "uniform h_in resolves each macro cell directly."
         )
 
-    cloak_field = _add_uniform_cloak_field(geometry, h_in, h_out)
+    cloak_field = cloak_field_fn(geometry, h_in, h_out)
     f_thresh_surf = _add_surface_field(p, top_lines, h_surf, h_out)
     _compose_background(cfg, cloak_field, f_thresh_surf)
 
