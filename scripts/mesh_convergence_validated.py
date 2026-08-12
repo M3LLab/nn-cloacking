@@ -117,6 +117,10 @@ def main() -> None:
             Path(args.params), Path(args.dataset), Path(args.config),
             rho_weight=args.rho_weight,
         )
+    # Solid phase of the tiled microstructure (cement, from the dataset's own
+    # provenance attrs) — NOT the soil background of the macro simulation.
+    solid = fsv.read_solid_phase(Path(args.dataset))
+    print(f"solid phase (microstructure): {solid}")
     print(
         f"canvas: {canvas.shape}  cloak cells: {diag['n_cloak']}/{diag['n_cells']}  "
         f"unique dataset entries: {diag['n_unique_dataset_entries']}\n"
@@ -154,6 +158,7 @@ def main() -> None:
             problem = fsv.build_pixel_problem(
                 cloak_mesh, config, dp, geometry,
                 canvas=canvas, cloak_bbox=cloak_bbox, void_ratio=args.void_ratio,
+                solid=solid,
             )
             sol_list = jax_fem.solver.solver(problem, solver_options=solver_opts)
             u_val = np.asarray(sol_list[0])

@@ -350,6 +350,17 @@ def solve_optimization_neural(
     print("=== Step 3: Setting up cell decomposition ===")
     cell_decomp = CellDecomposition(geometry, config.cells.n_x, config.cells.n_y)
     C0 = C_iso(params.lam, params.mu)
+    if config.cells.partition_cloak:
+        # Region-partition: replace the centre-based cloak_mask with a coverage
+        # mask (every tile that contains a cloak quadrature point becomes an
+        # independent material). Needs the qp→cell mapping, so build a throwaway
+        # problem just to read it; the real per-frequency problem is rebuilt
+        # below. confine_to_cloak is already forced True by the config validator.
+        _probe = build_problem(cloak_mesh, config, params, geometry, cell_decomp)
+        cell_decomp.cloak_mask = cell_decomp.active_mask_from_qp(_probe._qp_to_cell)
+        del _probe
+        print(f"  partition_cloak: {cell_decomp.n_cloak_cells} tiles cover the "
+              f"cloak (grid {config.cells.n_x}x{config.cells.n_y})")
     cell_mat = CellMaterial(
         geometry, C0, params.rho0, cell_decomp,
         n_C_params=config.cells.n_C_params,
@@ -376,7 +387,12 @@ def solve_optimization_neural(
         cap_anisotropy=neural_cfg.cap_anisotropy,
         anisotropy_ratio=neural_cfg.anisotropy_ratio,
         aniso_cauchy=config.cells.aniso_cauchy,
+        mirror_x=neural_cfg.mirror_x,
+        mirror_center=params.x_c if neural_cfg.mirror_x else None,
     )
+    if neural_cfg.mirror_x:
+        print(f"  mirror_x: C16/C26 sign-flipped about x_c={params.x_c:.4f} "
+              f"(effective DOF halved)")
     loaded_opt_state = None
     if neural_cfg.init_weights:
         theta_init, loaded_opt_state = load_theta(neural_cfg.init_weights)

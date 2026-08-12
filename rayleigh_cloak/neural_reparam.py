@@ -188,6 +188,9 @@ class NeuralReparam:
     # anisotropic-Cauchy Voigt 3×3 instead of the flat4 orthotropic decode —
     # keeps C PD while letting the C16/C26 coupling move off a zero init.
     aniso_cauchy: bool = False
+    # (n_cells,) of ±1, or None. When set (aniso_cauchy only), imposes the ideal
+    # cloak's mirror symmetry about x_c — see make_neural_reparam(mirror_x=...).
+    mirror_sign: Any = None
 
     def decode(self, theta: list[dict]) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Map MLP weights → (cell_C_flat, cell_rho).
@@ -236,6 +239,19 @@ class NeuralReparam:
             Linit = jnp.linalg.cholesky(Minit)           # lower factor
             d0, d1, d2 = Linit[:, 0, 0], Linit[:, 1, 1], Linit[:, 2, 2]
             o10, o20, o21 = Linit[:, 1, 0], Linit[:, 2, 0], Linit[:, 2, 1]
+
+            if self.mirror_sign is not None:
+                # Mirror prior. With P = diag(1,1,-1) (the Voigt-3 shear flip),
+                # a mirrored init obeys Minit_L = P Minit_R P, hence
+                # Linit_L = P Linit_R P by uniqueness of Cholesky — i.e. o20/o21
+                # already carry the flipped sign while d0..d2, o10 do not. The
+                # folded features make raw identical across a mirrored pair, so
+                # flipping the two raw channels that add to o20/o21 propagates
+                # the same congruence to the decoded L, giving M_L = P M_R P
+                # exactly: equal C11/C22/C66/C12/rho, opposite C16/C26.
+                ms = self.mirror_sign
+                raw = raw.at[:, 4].multiply(ms)
+                raw = raw.at[:, 5].multiply(ms)
 
             # positive diagonal in log-space; additive off-diagonal scaled by the
             # geomean of the connected init diagonals (commensurate step size).
@@ -324,8 +340,22 @@ def make_neural_reparam(
     cap_anisotropy: bool = True,
     anisotropy_ratio: float = 15.0,
     aniso_cauchy: bool = False,
+    mirror_x: bool = False,
+    mirror_center: float | None = None,
 ) -> tuple[list[dict], NeuralReparam]:
     """Create a NeuralReparam and initialize the MLP weights.
+
+    Parameters
+    ----------
+    mirror_x : impose the ideal triangular cloak's mirror symmetry about
+        ``mirror_center``. The MLP input is folded to ``|x - x_c|`` so a
+        mirrored cell pair sees identical features, and the decode flips the
+        C16/C26 coupling sign per side. Cells then satisfy the ideal's exact
+        structure (same C11/C22/C66/C12/rho, opposite C16/C26) by construction
+        rather than by optimisation, halving the effective DOF. Requires
+        ``aniso_cauchy`` — flat4 has no C16/C26 for the prior to act on.
+    mirror_center : cloak centreline x_c, in the same coordinates as
+        ``cell_decomp.cell_centers``. Required when ``mirror_x``.
 
     Returns
     -------
@@ -341,6 +371,27 @@ def make_neural_reparam(
     lo = centers.min(axis=0)
     hi = centers.max(axis=0)
     centers_norm = (centers - lo) / (hi - lo + 1e-10)
+
+    mirror_sign = None
+    if mirror_x:
+        if not (constrained and aniso_cauchy and n_C_params == 6):
+            raise ValueError(
+                "mirror_x requires constrained=True with the anisotropic-Cauchy "
+                "decode (cells.aniso_cauchy=True, n_C_params=6): the prior acts "
+                f"on the C16/C26 coupling, which n_C_params={n_C_params} lacks."
+            )
+        if mirror_center is None:
+            raise ValueError("mirror_x requires mirror_center (the cloak centreline x_c)")
+        # Sign from the raw (un-normalised) centre, matching the >= convention in
+        # TriangularCloakGeometry.F_tensor so the prior's sign agrees with the
+        # pushforward init's.
+        mirror_sign = jnp.where(centers[:, 0] >= mirror_center, 1.0, -1.0)
+        # Fold in normalised space (the un-normalised fold can collapse the x
+        # range to zero, e.g. a 2x1 grid, leaving the extent ill-defined).
+        xc_norm = (mirror_center - lo[0]) / (hi[0] - lo[0] + 1e-10)
+        centers_norm = jnp.stack(
+            [jnp.abs(centers_norm[:, 0] - xc_norm), centers_norm[:, 1]], axis=-1
+        )
 
     features = fourier_features(centers_norm, n_fourier)
     n_features = features.shape[1]
@@ -367,6 +418,7 @@ def make_neural_reparam(
         cap_anisotropy=cap_anisotropy,
         anisotropy_log_ratio=math.log(anisotropy_ratio),
         aniso_cauchy=aniso_cauchy,
+        mirror_sign=mirror_sign,
     )
 
     return theta, reparam

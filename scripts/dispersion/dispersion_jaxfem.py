@@ -24,6 +24,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -568,6 +570,41 @@ def compute_ipr(vecs, free_nodes, nodes, elems, right_to_left, bottom_nodes):
 # ── Sweep ─────────────────────────────────────────────────────────────
 
 
+def sweep_fingerprint(case: str, p: dict, k_vals: np.ndarray, n_eigs: int,
+                      h_elem: float, h_fine: float, lumped: bool,
+                      params_npz: str | None = None, n_C_params: int = 2,
+                      n_cells_x: int = 50, n_cells_y: int = 50) -> dict:
+    """Everything a cached sweep's contents depend on.
+
+    The filename tag carries the knobs varied most often, but a filename cannot
+    capture the whole input: ``--H-factor``, the config's geometry/material, and
+    *which* optimised parameters were used all change the result without
+    changing the name.  This fingerprint is stored inside the .npz and compared
+    on load, so a stale cache is recomputed rather than silently reused.
+
+    Deliberately excluded: ``ipr_thr`` and ``f_max``, which only affect
+    rendering — that is what makes cheap re-plots from cache possible.
+    """
+    fp = {
+        "case": case,
+        "n_kpts": int(len(k_vals)),
+        "n_eigs": int(n_eigs),
+        "h_elem": float(h_elem),
+        "h_fine": float(h_fine),
+        "lumped": bool(lumped),
+        # Geometry + material: catches --H-factor and any edit to the config.
+        **{k: float(p[k]) for k in ("H", "L_c", "a", "b", "c", "rho0", "cs")},
+    }
+    if case == "optimized_cloak":
+        fp["n_C_params"] = int(n_C_params)
+        fp["n_cells_x"] = int(n_cells_x)
+        fp["n_cells_y"] = int(n_cells_y)
+        if params_npz is not None:
+            fp["params_sha"] = hashlib.sha256(
+                Path(params_npz).read_bytes()).hexdigest()[:16]
+    return fp
+
+
 def run_sweep(case: str, p: dict, k_vals: np.ndarray, n_eigs: int,
               h_elem: float, h_fine: float, out_dir: Path, force: bool,
               lumped: bool = False, tag: str | None = None,
@@ -575,15 +612,33 @@ def run_sweep(case: str, p: dict, k_vals: np.ndarray, n_eigs: int,
               params_npz: str | None = None,
               n_C_params: int = 2,
               n_cells_x: int = 50, n_cells_y: int = 50):
-    """Run or load a Bloch-Floquet sweep for one case."""
+    """Run or load a Bloch-Floquet sweep for one case.
+
+    A cache is reused only when its stored fingerprint matches the current run
+    exactly; otherwise it is recomputed and the differing keys are reported.
+    """
     if tag is None:
-        tag = f"h{h_elem:g}_hf{h_fine:g}{'_lumped' if lumped else ''}"
+        tag = (f"h{h_elem:g}_hf{h_fine:g}_k{len(k_vals)}_e{n_eigs}"
+               f"{'_lumped' if lumped else ''}")
     npz_path = out_dir / f"dispersion_{case}_{tag}.npz"
 
+    fp = sweep_fingerprint(case, p, k_vals, n_eigs, h_elem, h_fine, lumped,
+                           params_npz, n_C_params, n_cells_x, n_cells_y)
+
     if npz_path.exists() and not force:
-        print(f"  Loading cached {npz_path.name}")
         d = np.load(npz_path)
-        return d["ks"], d["fs"], d["iprs"]
+        cached = json.loads(d["fingerprint"].item()) if "fingerprint" in d.files else None
+        if cached == fp:
+            print(f"  Loading cached {npz_path.name}")
+            return d["ks"], d["fs"], d["iprs"]
+        if cached is None:
+            print(f"  Recomputing {npz_path.name}: cache predates fingerprinting")
+        else:
+            diffs = ", ".join(
+                f"{k}: cached={cached.get(k, '—')} now={fp.get(k, '—')}"
+                for k in sorted(set(fp) | set(cached)) if cached.get(k) != fp.get(k)
+            )
+            print(f"  Recomputing {npz_path.name}: {diffs}")
 
     # For the optimized cloak, use the same mesh topology as ideal_cloak
     # (triangle cut out from the surface)
@@ -663,7 +718,8 @@ def run_sweep(case: str, p: dict, k_vals: np.ndarray, n_eigs: int,
     fs_out = np.array(fs_out)
     iprs_out = np.array(iprs_out)
 
-    np.savez(npz_path, ks=ks_out, fs=fs_out, iprs=iprs_out)
+    np.savez(npz_path, ks=ks_out, fs=fs_out, iprs=iprs_out,
+             fingerprint=json.dumps(fp, sort_keys=True))
     print(f"  Saved → {npz_path}")
     return ks_out, fs_out, iprs_out
 
@@ -871,12 +927,15 @@ def main():
     ap.add_argument("--workers", "-j", type=int, default=1)
     ap.add_argument("--params-npz", type=str, default=None,
                     help="Path to optimized_params.npz (cell_C_flat, cell_rho)")
-    ap.add_argument("--n-C-params", type=int, default=2,
-                    help="Number of flat stiffness params per cell (default: 2 = isotropic)")
-    ap.add_argument("--n-cells-x", type=int, default=50,
-                    help="Number of cells in x for optimized grid (default: 50)")
-    ap.add_argument("--n-cells-y", type=int, default=50,
-                    help="Number of cells in y for optimized grid (default: 50)")
+    ap.add_argument("--n-C-params", type=int, default=None,
+                    help="Number of flat stiffness params per cell. "
+                         "Default: cells.n_C_params from the config.")
+    ap.add_argument("--n-cells-x", type=int, default=None,
+                    help="Number of cells in x for the optimized grid. "
+                         "Default: cells.n_x from the config.")
+    ap.add_argument("--n-cells-y", type=int, default=None,
+                    help="Number of cells in y for the optimized grid. "
+                         "Default: cells.n_y from the config.")
     args = ap.parse_args()
 
     # Load config
@@ -890,6 +949,43 @@ def main():
     # Derive unit-cell parameters from config
     p = unit_cell_params(cfg, H_factor=args.H_factor)
 
+    # Cell decomposition: take it from the config unless explicitly overridden.
+    # These MUST match the optimisation run — a wrong grid maps every element to
+    # the wrong cell and yields a plausible-looking but wrong dispersion, with
+    # no error — so they are cross-checked against the .npz below.
+    n_C_params = args.n_C_params if args.n_C_params is not None else cfg.cells.n_C_params
+    n_cells_x = args.n_cells_x if args.n_cells_x is not None else cfg.cells.n_x
+    n_cells_y = args.n_cells_y if args.n_cells_y is not None else cfg.cells.n_y
+
+    # Validate everything about the optimised material up front: the sweeps
+    # below take tens of minutes, so a missing/mismatched .npz must fail now
+    # rather than after the reference sweep has already run.
+    needs_params = args.case in ("optimized", "optimized_vs_ref")
+    if needs_params and args.params_npz is None:
+        sys.exit(f"ERROR: --params-npz is required for --case {args.case}")
+    if not needs_params and args.params_npz is not None:
+        print(f"  NOTE: --params-npz is ignored for --case {args.case}")
+
+    if needs_params:
+        npz_path = Path(args.params_npz)
+        if not npz_path.exists():
+            sys.exit(f"ERROR: optimised params not found: {npz_path}")
+        with np.load(npz_path) as _d:
+            missing = {"cell_C_flat", "cell_rho"} - set(_d.files)
+            if missing:
+                sys.exit(f"ERROR: {npz_path} is missing {sorted(missing)} "
+                         f"(has {sorted(_d.files)})")
+            shape = _d["cell_C_flat"].shape
+        if shape != (n_cells_x * n_cells_y, n_C_params):
+            sys.exit(
+                f"ERROR: cell grid does not match {npz_path}\n"
+                f"  using : {n_cells_x}x{n_cells_y} = {n_cells_x * n_cells_y} cells"
+                f" x {n_C_params} params\n"
+                f"  npz has: {shape[0]} cells x {shape[1]} params\n"
+                f"  Fix cells.n_x / n_y / n_C_params in {cfg_path}, or pass\n"
+                f"  --n-cells-x / --n-cells-y / --n-C-params explicitly."
+            )
+
     out_dir = Path(args.out_dir) if args.out_dir else Path(cfg.output_dir) / "dispersion"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -902,9 +998,15 @@ def main():
     print(f"  Mesh: h_elem={args.h_elem}, h_fine={args.h_fine}")
     print(f"  k-points: {args.n_kpts},  eigenvalues/k: {args.n_eigs}")
     print(f"  Workers: {args.workers}")
-    if args.params_npz:
+    if needs_params:
+        overrides = [n for n, v in (("--n-cells-x", args.n_cells_x),
+                                    ("--n-cells-y", args.n_cells_y),
+                                    ("--n-C-params", args.n_C_params))
+                     if v is not None]
+        src = "config" if not overrides else f"config, overridden: {' '.join(overrides)}"
         print(f"  Optimized params: {args.params_npz}")
-        print(f"  Cell grid: {args.n_cells_x}x{args.n_cells_y}, n_C_params={args.n_C_params}")
+        print(f"  Cell grid: {n_cells_x}x{n_cells_y}, n_C_params={n_C_params} "
+              f"({src}; matches npz ✓)")
     print(f"  Output: {out_dir}\n")
 
     L_c = p["L_c"]
@@ -915,8 +1017,8 @@ def main():
         out_dir=out_dir, force=args.force,
         lumped=args.lumped_mass, workers=args.workers,
         params_npz=args.params_npz,
-        n_C_params=args.n_C_params,
-        n_cells_x=args.n_cells_x, n_cells_y=args.n_cells_y,
+        n_C_params=n_C_params,
+        n_cells_x=n_cells_x, n_cells_y=n_cells_y,
     )
 
     ref_data = cloak_data = None
@@ -925,9 +1027,7 @@ def main():
     if args.case in ("both", "ideal_cloak"):
         cloak_data = run_sweep("ideal_cloak", p, k_vals, **sweep_kw)
     if args.case in ("optimized", "optimized_vs_ref"):
-        if args.params_npz is None:
-            print("ERROR: --params-npz is required for optimized_cloak case")
-            sys.exit(1)
+        # --params-npz was validated up front, before any sweep ran.
         cloak_data = run_sweep("optimized_cloak", p, k_vals, **sweep_kw)
 
     if ref_data is not None and cloak_data is not None:
