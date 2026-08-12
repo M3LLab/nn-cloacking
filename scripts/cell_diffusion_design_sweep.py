@@ -42,6 +42,12 @@ from pathlib import Path
 # preallocate the whole GPU and starve the diffusion sampler.
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+# Phase-2 hifi homogenisation is scipy/BLAS; we parallelise across cells with a
+# process pool, so keep each worker single-threaded to avoid oversubscription.
+# Must be set before numpy/scipy import (below) so BLAS honours it.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import matplotlib
 matplotlib.use("Agg")
@@ -58,6 +64,12 @@ from dataset.cellular_chiral.inverse_design import (
     compute_rho_eff,
     save_design,
 )
+# Static hi-fi homogeniser (TRI6 @ N=100 by default) — the SAME one used to
+# label the ca_squared_2m dataset (stiffness.h5 attrs: homog_method='hifi',
+# ele_type='TRI6', mesh_N=100, elem_per_pixel=2). Using it here keeps the
+# diffusion cells' realised (C11,C22,C12,C66,rho) on the dataset's footing.
+from dataset.stiffness.calc_fem_hifi import compute_stiffness_hifi
+from dataset.cellular_chiral.bulk_stiffness import _ortho_params_from_C
 
 from scripts.cell_inverse_design_sweep import (
     _FLAT4_LABELS,
@@ -180,6 +192,73 @@ def select_best_candidate(
         "pred_rho": preds_rho[best],
         "seed_errs": np.array(errs),
     }
+
+
+# ── hi-fi (TRI6) homogenisation, parallel best-of-N (phase 2, default) ─
+
+
+def _homog_one_hifi(canvas: np.ndarray, N: int, ele_type: str) -> np.ndarray:
+    """Static hi-fi homogenise one 50×50 binary cell → [C11, C22, C12, C66, rho].
+
+    Module-level (picklable) so it runs in a multiprocessing worker. Uses the
+    exact dataset homogeniser (compute_stiffness_hifi + _ortho_params_from_C)."""
+    C_eff, rho_eff, _vf = compute_stiffness_hifi(
+        np.asarray(canvas, dtype=np.uint8), N=N, ele_type=ele_type,
+    )
+    c11, c22, c12, c66 = _ortho_params_from_C(C_eff)
+    return np.array([c11, c22, c12, c66, rho_eff], dtype=np.float64)
+
+
+def select_best_candidates_hifi(
+    candidates: np.ndarray,        # (n_cells, num_seeds, 50, 50) uint8
+    targets_flat4: np.ndarray,     # (n_cells, 4)
+    targets_rho: np.ndarray,       # (n_cells,)
+    N: int,
+    ele_type: str,
+    workers: int,
+) -> list[dict]:
+    """Homogenise EVERY candidate (all cells × all seeds) with the static hi-fi
+    TRI6 homogeniser in a process pool, then keep the lowest-error seed per cell.
+
+    Returns a list (len n_cells) of the same dicts ``select_best_candidate``
+    produces, so the save/plot path is unchanged.
+    """
+    import multiprocessing as mp
+    from functools import partial
+
+    m, ns = candidates.shape[:2]
+    flat = candidates.reshape(m * ns, *candidates.shape[2:])   # (m*ns, 50, 50)
+    fn = partial(_homog_one_hifi, N=N, ele_type=ele_type)
+
+    print(f"  homogenising {m * ns} candidates "
+          f"({ele_type} N={N}) across {workers} workers ...")
+    t0 = time.perf_counter()
+    ctx = mp.get_context("spawn")   # avoid CUDA-in-forked-process issues
+    preds = [None] * (m * ns)
+    with ctx.Pool(workers) as pool:
+        for i, r in enumerate(pool.imap(fn, list(flat), chunksize=4)):
+            preds[i] = r
+            if (i + 1) % 100 == 0 or i == m * ns - 1:
+                dt = time.perf_counter() - t0
+                print(f"    {i + 1}/{m * ns}  ({dt:.0f}s, {dt / (i + 1):.2f}s/solve)")
+    preds = np.asarray(preds).reshape(m, ns, 5)                # [...,:4]=flat4, [...,4]=rho
+
+    sels: list[dict] = []
+    for j in range(m):
+        pf, pr = preds[j, :, :4], preds[j, :, 4]
+        errs = np.array([
+            _avg_comp_err(pf[s], float(pr[s]), targets_flat4[j], float(targets_rho[j]))
+            for s in range(ns)
+        ])
+        best = int(np.argmin(errs))
+        sels.append({
+            "best_idx": best,
+            "canvas": candidates[j, best].astype(np.uint8),
+            "pred_flat4": pf[best],
+            "pred_rho": float(pr[best]),
+            "seed_errs": errs,
+        })
+    return sels
 
 
 # ── visualization ────────────────────────────────────────────────────
@@ -314,6 +393,19 @@ def main() -> None:
     parser.add_argument("--simp-p", type=float, default=3.0,
                         help="SIMP exponent for homogenisation eval (default 3; inert "
                              "on a binary {0,1} canvas, matches the inverse-design sweep)")
+    parser.add_argument("--homog", choices=("hifi", "legacy"), default="hifi",
+                        help="Phase-2 homogeniser for selection & realised (C,rho). "
+                             "'hifi' = static TRI6 @ N=100 (default) — the SAME "
+                             "homogeniser that labelled ca_squared_2m, so pred is on "
+                             "the dataset footing. 'legacy' = the old jax-fem TRI3 "
+                             "dynamic homogenisation at f_star.")
+    parser.add_argument("--homog-N", type=int, default=100,
+                        help="hifi mesh resolution N (N=100 on a 50-px cell = 2 el/pix).")
+    parser.add_argument("--homog-ele", choices=("TRI6", "TRI3"), default="TRI6",
+                        help="hifi element type (default TRI6, matches the dataset).")
+    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1),
+                        help="Process-pool size for parallel hifi homogenisation "
+                             "(default: n_cpus-1).")
     parser.add_argument("--resume", action="store_true",
                         help="Skip cells whose output already contains canvas.npy")
     args = parser.parse_args()
@@ -380,18 +472,29 @@ def main() -> None:
             seed=args.seed, device=args.device, compressed=args.compressed,
         )
 
-        # ── PHASE 2: homogenise + select (jax-fem) ────────────────────
-        print(f"\n=== Phase 2: homogenisation & best-of-{args.num_seeds} selection ===")
-        print(f"Building FEM setup (f_star={f_star} Hz, simp_p={args.simp_p})...")
-        setup = build_homog_setup(canvas_N=50, f_star=f_star, simp_p=args.simp_p,
-                                  rho_solid=rho_solid)
-        print("FEM setup ready.\n")
+        # ── PHASE 2: homogenise + select ──────────────────────────────
+        print(f"\n=== Phase 2: {args.homog} homogenisation & "
+              f"best-of-{args.num_seeds} selection ===")
+        if args.homog == "hifi":
+            # Static TRI6 @ N=100 — dataset-compatible; parallel over candidates.
+            sels = select_best_candidates_hifi(
+                candidates, targets_flat4, targets_rho,
+                N=args.homog_N, ele_type=args.homog_ele, workers=args.workers,
+            )
+            setup = None
+        else:
+            print(f"Building FEM setup (f_star={f_star} Hz, simp_p={args.simp_p})...")
+            setup = build_homog_setup(canvas_N=50, f_star=f_star, simp_p=args.simp_p,
+                                      rho_solid=rho_solid)
+            print("FEM setup ready.\n")
+            sels = None
 
         for j, cell_idx in enumerate(pending):
             t0 = time.perf_counter()
             tgt4 = targets_flat4[j]
             tgt_rho = targets_rho[j]
-            sel = select_best_candidate(candidates[j], tgt4, tgt_rho, setup)
+            sel = sels[j] if sels is not None else \
+                select_best_candidate(candidates[j], tgt4, tgt_rho, setup)
             pred_flat4, pred_rho = sel["pred_flat4"], sel["pred_rho"]
 
             cell_dir = out_dir / f"cell_{cell_idx:03d}"

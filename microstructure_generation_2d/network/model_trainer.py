@@ -56,7 +56,7 @@ class DiffusionModel(LightningModule):
         num_res_blocks: int = 1,
         parameterization: str = "x0",
         min_snr_gamma: float = 0.0,
-        reweight: str | None = None,
+        reweight: str | list[str] | None = None,
         reweight_bins: int = 50,
         reweight_clip: float = 0.0,
     ):
@@ -107,7 +107,10 @@ class DiffusionModel(LightningModule):
         self.split_seed = split_seed
         self._split = None
         # Loss reweighting: flatten the training distribution along an h5 column
-        # (e.g. "vf"). None -> uniform (legacy behaviour).
+        # (e.g. "vf"). None -> uniform (legacy behaviour). A list of columns
+        # multiplies their inverse-density weights, which lets a finetune
+        # balance two data sources (a binary "src" column with bins=2 gives each
+        # source equal total gradient mass) on top of the usual vf flattening.
         self.reweight = reweight
         self.reweight_bins = reweight_bins
         self.reweight_clip = reweight_clip
@@ -147,21 +150,32 @@ class DiffusionModel(LightningModule):
     def _sample_weights(self):
         """Full-length (n_h5,) per-row train weights that flatten ``self.reweight``.
 
-        Only training rows are reweighted; all other rows get weight 1.0.
+        Only training rows are reweighted; all other rows get weight 1.0. With
+        several columns the per-column weights multiply, and the clip + mean-1
+        renormalisation is applied once to the product.
         """
         if self.reweight is None:
             return None
         if self._weights is None:
             import h5py
             import numpy as np
+            cols = [self.reweight] if isinstance(self.reweight, str) else list(self.reweight)
             train_idx = np.asarray(self._split_dict()["train"], dtype=np.int64)
             with h5py.File(self.h5_path, "r") as f:
                 n = f["cells"].shape[0]
-                vals = f[self.reweight][:]
+                vals = {c: f[c][:] for c in cols}
+            # Binary source flags need exactly one bin per level, not 50.
+            wt = np.ones(train_idx.size, dtype=np.float64)
+            for c in cols:
+                v = vals[c][train_idx]
+                nb = min(self.reweight_bins, len(np.unique(v)))
+                wt *= inverse_density_weights(v, bins=max(nb, 1), clip=0.0)
+            wt *= wt.size / wt.sum()
+            if self.reweight_clip and self.reweight_clip > 0:
+                wt = np.minimum(wt, self.reweight_clip)
+                wt *= wt.size / wt.sum()
             w = np.ones(n, dtype=np.float32)
-            w[train_idx] = inverse_density_weights(
-                vals[train_idx], bins=self.reweight_bins, clip=self.reweight_clip
-            )
+            w[train_idx] = wt.astype(np.float32)
             self._weights = w
         return self._weights
 

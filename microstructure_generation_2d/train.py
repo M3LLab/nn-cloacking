@@ -80,6 +80,26 @@ def main() -> None:
     )
     model = DiffusionModel(**model_kwargs)
 
+    # Finetuning: start from ANOTHER run's weights (both the raw model and its
+    # EMA copy) with a fresh optimizer/LR schedule and a fresh epoch counter.
+    # This is deliberately not `continue_training`, which resumes full trainer
+    # state inside the same results_folder.
+    init_from = cfg.get("init_from")
+    if init_from:
+        import torch
+        sd = torch.load(init_from, map_location="cpu", weights_only=False)["state_dict"]
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        n_model = sum(k.startswith("model.") for k in sd)
+        n_ema = sum(k.startswith("ema_model.") for k in sd)
+        print(f"init_from {init_from}: loaded {n_model} model + {n_ema} ema tensors"
+              f"{f'; missing={len(missing)}' if missing else ''}"
+              f"{f'; unexpected={len(unexpected)}' if unexpected else ''}")
+        if missing:
+            raise SystemExit(
+                f"init_from checkpoint is missing {len(missing)} params "
+                f"(architecture mismatch), e.g. {missing[:3]}"
+            )
+
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=results_folder, name="logs", default_hp_metric=False
     )
