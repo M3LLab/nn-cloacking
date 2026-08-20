@@ -82,6 +82,7 @@
 %     gap (${\sim}25\%$, hidden anisotropy); displacement-field validation;
 %     microstructure gallery; broadband micro-constrained extension.
 
+
 %   \item \textbf{Discussion} ---
 %     Comparison with Wang (2022) and Chatzopoulos (2023); limitations
 %     (square cells, isotropic descriptor); future work (generative
@@ -101,28 +102,27 @@
 \title{Neural-field design of broadband Rayleigh-wave carpet cloaks
 under microstructure realisability constraints}
 
-\author[1]{David Aznaurov}
+\author[1,2]{David Aznaurov}
 \author[1]{David Piliposyan}
 \author[1]{Danila Rukhovich}
-\author[2]{Sébastien Guenneau}
+\author[3]{Sébastien Guenneau}
 
-\affiliation[1]{organization={M:3L Lab, Institute of Mechanics},
+\affiliation[1]{organization={M:3L Lab, Institute of Mechanics, 24B Baghramyan Ave., 0019 Yerevan},
                 country={Armenia}}
-
-\affiliation[2]{organization={The Blackett Laboratory, Department of Physics, Imperial College London},
+\affiliation[2] {organization={Biutopic, 18 Rue Paul Ramadier, 44201 Nantes}, country={France}}
+\affiliation[3]{organization={The Blackett Laboratory, Department of Physics, UMI 2004 Abraham de Moivre-CNRS, Imperial College London},
                 addressline={London SW7 2AZ},
                 country={United Kingdom}}
 
 \begin{abstract}
 
-Transformation elasticity provides exact material distributions for elastodynamic cloaks, but the required stiffness tensors generally violate the minor symmetries of classical Cauchy elasticity and are difficult to realise using conventional materials.
+Transformation elasticity provides appropriate material distributions for elastodynamic cloaks, but the required stiffness tensors generally violate the minor symmetries of classical Cauchy elasticity and are difficult to realise using conventional materials.
 Existing approaches restore these symmetries by modifying or symmetrising the transformed tensor, producing only an approximate cloak.
-Here we formulate 2D Rayleigh-wave carpet-cloak design as a PDE-constrained optimisation problem, using a coordinate-based neural network (neural-field) and a differentiable finite-element solver to optimise symmetric stiffness and density fields by minimising wave-field distortion.
+Here we formulate 2D Rayleigh-wave carpet-cloak design as a Partial Differential Equation-constrained optimisation problem, using a coordinate-based neural network (neural-field) and a differentiable Finite Element Model (FEM) solver to optimise symmetric stiffness and density fields by minimising wave-field distortion.
 We consider both single-frequency and broadband optimisation, with the broadband model trained simultaneously over multiple frequencies.
-
 Physical realisability is addressed using a database of homogenised microstructures through conditional diffusion, neural-field inverse design, and nearest-neighbour selection.
-FEM simulations show that the unconstrained design approaches ideal transformation-based cloaking,
-while the best realisable design retains approximately 97\% of this performance, providing a direct route from continuum optimisation to microstructured Rayleigh-wave cloaks.
+FEM simulations show that the unconstrained design \textcolor{red}{approaches to} \textcolor{red}{(G.P. not clear)} the ideal transformation-based cloaking,
+while the best realisable design retains over 95\% of this performance, providing a direct route from continuum optimisation to microstructured Rayleigh-wave cloaks.
 
 \end{abstract}
 
@@ -142,13 +142,15 @@ around an object. A coordinate map $\mbf{x}=\Xi(\mbf{X})$ opens up room
 for the object to hide in, and rewriting the elastodynamic equations in
 the mapped coordinates prescribes a position-dependent material in a
 surrounding coating that guides waves past the object as if it were not
-there~\citep{brun2009,norris2011}. It is the mechanical counterpart of
-transformation optics~\citep{pendry2006}. The ``carpet'' variant, which
+there~\citep{milton2006,brun2009,norris2011,diatta2014controlling}. It is the mechanical counterpart of
+transformation optics~\citep{pendry2006}. The ``carpet cloak'' variant, which
 hides a defect on an otherwise flat free surface~\citep{li2008}, is the
-configuration most accessible to experiment~\citep{stenger2012,buckmann2015}.
+configuration most accessible to experiments in the three-dimensional elastostatic setting ~\citep{buckmann2014elasto}. 
+A two-dimensional mechanical cloak based on a direct lattice transformation was experimentally demonstrated in the static regime~\citep{buckmann2015}; however, numerical simulations indicate that its cloaking performance deteriorates markedly beyond the quasi-static regime~\citep{kadic2020elastodynamic}.
+%\textcolor{red}{6 and 7 are not carpet cloaks, an elastic carpet cloak was fabricated in https://www.nature.com/articles/ncomms5130 but uses the trick of a pentamode medium behaving like a fluid so killing the shear wave component of the elasticity field.} 
 
-The coating material follows from the Brun--Guenneau--Movchan (BGM)
-push-forward,
+In \citep{brun2009,diatta2014controlling} the coating material follows from the Brun--Guenneau--Movchan (BGM)
+push-forward \textcolor{red}{method?},
 $c^{\mathrm{eff}}_{ijkl}=J^{-1}\,C_{IjKl}\,F_{iI}\,F_{kK}$ and
 $\rho^{\mathrm{eff}}=\rho\,J^{-1}$, where $\mbf{F}=\nabla_{\!X}\mbf{x}$
 is the transformation gradient and $J=\det\mbf{F}$~\citep{brun2009,norris2011}.
@@ -157,25 +159,21 @@ breaks the minor symmetries, so the ideal cloak is a polar (Cosserat)
 medium that lies outside the class of ordinary Cauchy
 materials~\citep{milton1995,milton2006}. Turning this exact but
 non-realisable prescription into a cloak that can be built from common
-materials is the problem we address.
+materials is the problem we address. Alternatively, one can enforce the symmetry of the transformed elasticity tensor, but this leads to an elasticity equation with an anisotropic mass density and additional rank-3 tensors, hard to achieve in practice~\citep{milton2006,norris2011}.
 
-We focus on Rayleigh waves, which travel along the free surface of a
-half-space in 2D. Their exact cloak is the polar tensor described above,
-and approaches to realising it with ordinary materials fall into three
-families: symmetrising it into a genuine Cauchy
-material, at the price of only approximate cloaking~\citep{norris2008,norris2011};
-reproducing the broken minor symmetry with a purpose-built lattice whose
+The constraints on the material parameters can be  \textcolor{red}{relaxed substantially} for two-dimensional elastic carpet cloaks, provided that the defect on the free surface is smooth~\citep{quadrelli2021elastic}. These cloaks are particularly well suited to controlling surface Rayleigh waves, which propagate along the free surface of a two-dimensional half-space.
+
+Inspired by the study~\citep{quadrelli2021elastic}, we focus on carpet cloaks for Rayleigh waves. The exact cloak is described by the polar tensor introduced above, while approaches to realising it using ordinary materials can be broadly divided into three families. The first is to symmetrise the tensor to obtain a genuine Cauchy material, at the cost of reducing cloaking to an approximate effect~\citep{norris2008,norris2011}.
+The second to reproduce the broken minor symmetry with a purpose-built lattice whose
 ordinary spring-and-mass elements, endowed with distributed restoring
 torques, assemble into a macroscopically polar (Cosserat)
-medium~\citep{nassar2018}; or selecting orthotropic Cauchy cells from a
+medium~\citep{nassar2018}. The third to select orthotropic Cauchy cells from a
 precomputed database, as done for quasi-static mechanical
 cloaks~\citep{wang2022}. For Rayleigh waves specifically,
 \citet{chatzopoulos2023} compared triangular and semi-circular carpet
 cloaks and symmetrised their tensors by the arithmetic mean, reporting the
 symmetrised quadratic semi-circular design as the best performing.
-The triangular cloak is, however, especially attractive because its piecewise-affine transformation 
-has a constant Jacobian within each half of the cloak and consequently, the required effective 
-material properties are homogeneous in each region.
+The triangular cloak is especially attractive because its piecewise-affine transformation has a constant Jacobian within each half of the cloak. Consequently, the required effective material properties are homogeneous within each region.
 
 Our approach to finding a design inside the Cauchy class of ordinary
 materials is a differentiable pipeline built on a JAX-FEM solver~\citep{xu2020jaxfem}
@@ -196,7 +194,7 @@ is trained against a frequency-domain elastodynamic cloaking objective, so
 as to approximate the non-symmetric transformation-elasticity material.
 
 We first use the pipeline to search for the best
-single realisable material the orthotropic Cauchy moduli
+single realisable material \textcolor{red}{characterised by or with?} the orthotropic Cauchy moduli
 $(C_{11},C_{12},C_{22},C_{66})$ that most closely reproduce the ideal
 response, rather than fixing them by symmetrisation. To improve on it while
 staying realisable, we then discretise the cloak into a regular grid of
@@ -206,7 +204,7 @@ cell is filled with a two-phase (solid/void) microstructure drawn from a
 database of homogenised unit cells~\citep{nakarmi2024}; the cells share a
 single common base material and differ only in their internal geometry, so
 the whole cloak can be manufactured from one constituent by varying the
-pattern from cell to cell. To our knowledge no previous study has
+pattern from cell to cell. To best of our knowledge no previous study has
 demonstrated a Rayleigh-wave elastodynamic cloak realised this way from a
 common material: earlier work either stops at effective symmetrised
 tensors~\citep{chatzopoulos2023}, or reproduces the exact polar tensor only
@@ -235,7 +233,7 @@ limitations, and Section~\ref{sec:conclusion} concludes.
   \includegraphics[width=\linewidth]{figures/problem-setup.png}
   \caption{Problem configuration. \textbf{(a)}~Computational domain:
   an isotropic elastic half-space $(\lambda,\mu,\rho)$ of width
-  $W=12.5\,b$ is truncated by PML absorbing layers on the lateral and
+  $W=12.5\,b$ is truncated by Perfectly Matched Layers (PML) on the lateral and
   bottom boundaries; the top surface is traction-free. A time-harmonic
   vertical point force (red arrow) applied upstream generates Rayleigh
   waves (orange wavefronts) that propagate towards the triangular cloak
@@ -261,7 +259,7 @@ elastodynamic equation takes the following form
   = \rho\,\mbf{U}_{tt},
 \ee
 where $\mbf{C}$ is the isotropic fourth-order elasticity tensor,
-$\mbf{U}=(U_1,U_2)$ is the displacement, and $\mbf{U}_{tt}$ denotes its
+$\mbf{U}=(U_1,U_2)$ is the in-plane displacement, and $\mbf{U}_{tt}$ denotes its
 second time derivative. Under the assumption of plane-strain
 elasticity, the elastic tensor can be written in Voigt notation
 $\{1,2,6\}=\{11,22,12\}$ as
@@ -307,8 +305,7 @@ equation in the physical domain retains the Navier form
   \nabla_{\!x}\cdot\bigl(\mbf{c}^{\mathrm{eff}}:\nabla_{\!x}\mbf{u}\bigr)
   = \rho^{\mathrm{eff}}\,\mbf{u}_{tt},
 \ee
-with the transformed mechanical parameters given by the
-Brun--Guenneau--Movchan (BGM) transformation relations
+with the transformed mechanical parameters given by the BGM transformation relations
 \be\label{eq:pushforward}
   c^{\mathrm{eff}}_{ijkl} = J^{-1}\,C_{IjKl}\,F_{iI}\,F_{kK},
   \qquad
@@ -324,8 +321,7 @@ ones,
   \neq c^{\mathrm{eff}}_{jilk},
 \ee
 except for special cases such as conformal transformations. The medium
-is nonetheless described by a single fourth-order, non-symmetric and,
-eventually, inhomogeneous elastic tensor with scalar density: the
+is nonetheless described by a single fourth-order, non-symmetric inhomogeneous elastic tensor with scalar density: the
 stress $\sigma_{ij}=c^{\mathrm{eff}}_{ijkl}\,\partial u_k/\partial x_l$
 acts on the \emph{full} displacement gradient not the symmetric
 strain and is itself non-symmetric (polar medium). All computations
@@ -415,9 +411,9 @@ a general symmetric Cauchy tensor has six independent constants,
   \end{bmatrix}
   \begin{bmatrix}\varepsilon_{11}\\ \varepsilon_{22}\\ 2\varepsilon_{12}\end{bmatrix}.
 \ee
-Reflection across the edge, ((x_1,x_2)\mapsto(x_1,-x_2)), leaves the normal strains unchanged 
-but reverses the sign of the shear strain. Mirror symmetry therefore eliminates 
-coupling between normal and shear deformation, requiring (C_{16}=C_{26}=0). 
+Reflection across the edge, $(x_1,x_2)\mapsto(x_1,-x_2)$, leaves the normal strains unchanged
+but reverses the sign of the shear strain. Mirror symmetry therefore eliminates
+coupling between normal and shear deformation, requiring $C_{16}=C_{26}=0$.
 The stiffness tensor consequently takes the block-diagonal orthotropic form
 \be\label{eq:4cm}
   \mbf{C}_{\mathrm{4CM}}
@@ -439,8 +435,7 @@ whose centre lies between the inner and outer triangles
 stiffness and the density~\eqref{eq:rhoeff}. Because the triangular
 transformation is affine in Cartesian coordinates, the
 tensor~\eqref{eq:Ceff} is passed to the FEM solver without any rotation
-to a local frame. The grid resolution is itself a design choice and is
-selected in Sec.~\ref{subsec:grid_selection}.
+to a local frame.
 
 \begin{figure}[htbp]
   \centering
@@ -459,7 +454,7 @@ selected in Sec.~\ref{subsec:grid_selection}.
 
 We consider a rectangular computational domain of width $W=12.5\,b$ and
 depth $H=4.305\,b$, truncating the half-space. The top boundary is
-traction-free; PML absorbing layers terminate the two lateral
+traction-free; Perfectly Matched Layers (reflectionless absorbing layers) terminate the two lateral
 boundaries and the bottom. A triangular surface notch of depth
 $a=0.0774\,H$ and half-width $c=0.1545\,H$ is centred on the free
 surface, coated by a cloak of depth $b=3a$. The background medium is
@@ -523,9 +518,9 @@ multilayer perceptron (MLP)
   \Phi_\theta\colon(x,y)\;\mapsto\;(\mbf{C}_{\mathrm{4CM}}(x,y),\,\rho(x,y)),
 \ee
 where $\theta$ denotes the network weights,
-$\mbf{C}_{\mathrm{4CM}}\in\mathbb{R}^{4}$ contains the four free Cauchy
+$\mbf{C}_{\mathrm{4CM}}\in\mathbb{R}^{4}$ contains the four independent Cauchy
 moduli $(\mbf{C}_{\mathrm{4CM}}$  the design variables directly
-searched by the optimiser and $\rho$ is a positive scalar density. The network
+searched by the optimiser and $\rho > 0$ is scalar density. These five quantities constitute the material design variables predicted by the network. The network
 is evaluated at each cloak-cell centre to produce the piecewise-constant
 material assignment that is then expanded to the FEM quadrature points.
 A four-layer MLP with 256 hidden units ($\sim\!200{,}000$ weights) is
@@ -533,40 +528,34 @@ used in all experiments; we adopt $\tanh$ activations and the Fourier
 positional encoding of \citet{tancik2020fourier} so that the network
 can represent sharp material transitions near the cloak boundaries.
 Figure~\ref{fig:nf-arch} shows the architecture and the data flow
-through the differentiable FEM.
-
-\subsection{Transformation-elasticity prior}
-
-The network does not learn the cloak from scratch. The four Cauchy moduli
-per cell are initialised at a starting point $\mbf{C}_{\mathrm{4CM}}^{(0)}$
-and then freely optimised. We tried two choices for this starting point the 
+through the differentiable FEM. For Optimisation prior we tried two choices for the starting point for the four Cauchy moduli: the 
 arithmetic-mean symmetrisation of the ideal tensor~\eqref{eq:Ceff} and the mean of the
 microstructure dataset and found no statistically
 significant difference in the converged results, indicating that the design
 is driven by the cloaking objective rather than by the initialisation.
-In practice, the last layer is scaled near zero
-($\mbf{W}\leftarrow 0.01\,\mbf{W},\;\mbf{b}\leftarrow\mbf{0}$) and the
-network output is applied as a \emph{multiplicative residual} with default
-output scale $\epsilon=0.1$:
-\begin{subequations}\label{eq:neural_relative}
-\begin{align}
-  \mbf{C}_{\mathrm{4CM}}(x,y)
-    &= \mbf{C}_{\mathrm{4CM}}^{(0)}(x,y)\odot
-       \bigl(1+\epsilon\,\Phi_\theta^{(C)}(x,y)\bigr),
-       \label{eq:neural_relative_C}\\
-  \rho(x,y)
-    &= \rho^{(0)}(x,y)\bigl(1+\epsilon\,\Phi_\theta^{(\rho)}(x,y)\bigr).
-       \label{eq:neural_relative_rho}
-\end{align}
-\end{subequations} The multiplicative form makes
-the relative perturbation spatially uniform regardless of the orders of
-magnitude separating the stiffness and density entries within each
-cloak phase.
+% In practice, the last layer is scaled near zero
+% ($\mbf{W}\leftarrow 0.01\,\mbf{W},\;\mbf{b}\leftarrow\mbf{0}$) and the
+% network output is applied as a \emph{multiplicative residual} with default
+% output scale $\epsilon=0.1$:
+% \begin{subequations}\label{eq:neural_relative}
+% \begin{align}
+%   \mbf{C}_{\mathrm{4CM}}(x,y)
+%     &= \mbf{C}_{\mathrm{4CM}}^{(0)}(x,y)\odot
+%        \bigl(1+\epsilon\,\Phi_\theta^{(C)}(x,y)\bigr),
+%        \label{eq:neural_relative_C}\\
+%   \rho(x,y)
+%     &= \rho^{(0)}(x,y)\bigl(1+\epsilon\,\Phi_\theta^{(\rho)}(x,y)\bigr).
+%        \label{eq:neural_relative_rho}
+% \end{align}
+% \end{subequations} The multiplicative form makes
+% the relative perturbation spatially uniform regardless of the orders of
+% magnitude separating the stiffness and density entries within each
+% cloak phase.
 
 \subsection{Physical admissibility of the material output}\label{sec:constrained}
 
-The multiplicative residual~\eqref{eq:neural_relative} does not by itself guarantee 
-a realisable material the MLP can drive
+In our approach nothing by itself guarantees 
+a realisable material; the MLP can drive
 a stiffness negative, break the positive-definiteness of the Cauchy
 tensor, or reach an anisotropy ratio no real microstructure can realise.
 Rather than police these violations with penalty terms after the fact, we
@@ -696,10 +685,10 @@ recovers only $\eta=0.63$ and distorts the near field more than the bare notch,
 whereas a single optimised orthotropic tile reaches $\eta=0.86$ a
 substantial move towards the ideal continuous polar cloak ($\eta=0.999$) from a
 smaller material class and half the materials, and clear evidence that
-optimising inside the Cauchy class outperforms symmetrisation.
+optimising inside the Cauchy class outperforms symmetrisation.c
 The advantage is concentrated around the design frequency, as expected for a
 single-frequency optimisation. Matching the baseline's own 6CM class and
-material count --- two optimised tiles, one per half --- makes the comparison like-for-like and lifts
+material count two optimised tiles, one per half makes the comparison like-for-like and lifts
 this to $\eta=0.947$.
 
 The 6CM design is included only for a comparison with the
@@ -735,14 +724,8 @@ Ideal continuous $\mbf{c}_{\mathrm{eff}}$ (polar) & 2 & polar & $0.999$ \\
 Giving each phase more freedom closes most of the remaining gap. Splitting
 the cloak into a coarse $n_x\times n_y$ grid of independent orthotropic tiles
 and optimising all of them jointly, we find that even a $2\times2$
-decomposition --- just \emph{four} realisable materials --- lifts the cloak
-ratio to $\eta=0.962$, i.e.\ within $4\%$ of a perfect cloak. The improvement
-is markedly anisotropic: subdividing in depth helps far more than in the
-propagation direction ($1\times2$ reaches $\eta=0.92$ whereas $2\times1$
-actually drops to $\eta=0.78$), reflecting that the ideal cloak material
-varies mainly with depth through the shear map~\eqref{eq:shearmap}. Beyond
-four materials the gain per added cell is small, motivating a more systematic
-grid study.
+decomposition  just \emph{four} realisable materials  lifts the cloak
+ratio to $\eta=0.962$, i.e.\ within $4\%$ of a perfect cloak. 
 
 \subsection{Grid selection}
 \label{subsec:grid_selection}
@@ -772,10 +755,9 @@ materials. The only visible residual is a slight phase shift of the optimised so
 Figure~\ref{fig:single14_zoom} zooms into the cloak region and shows that,
 whereas the ideal continuous cloak keeps its near-surface wavefronts
 phase-aligned with the reference, the optimised $14\times10$ cloak carries them
-$\approx0.18\lambda$ ($\approx65^\circ$) later. This lag is a direct and benign
-consequence of the phase-invariant magnitude loss~\eqref{eq:opt_loss_cloak}:
-the objective constrains only the amplitude envelope, leaving a constant phase
-offset --- the small extra path of a wave routed around the notch ---
+$\approx0.18\lambda$ ($\approx65^\circ$) later. This phase lag is consistent with the phase-invariant magnitude loss ~\eqref{eq:opt_loss_cloak}:
+which constrains the displacement magnitude but does not penalise phase differences, leaving a constant phase
+offset the small extra path of a wave routed around the notch 
 unpenalised.
 Figure~\ref{fig:single14_material} shows the corresponding
 optimised per-cell moduli $(C_{11},C_{22},C_{12},C_{66})$ and density over
@@ -804,7 +786,7 @@ the $46$ cloak cells.
   dashed lines outline the inner (defect) and outer cloak boundaries. All three
   reproduce the same amplitude envelope, but the optimised cloak leaves its
   near-surface wavefronts slightly phase-shifted ($\approx0.18\lambda$,
-  $\approx65^\circ$) relative to the reference and the ideal cloak --- a
+  $\approx65^\circ$) relative to the reference and the ideal cloak  a
   constant phase offset left unconstrained by the phase-invariant magnitude
   loss, not a cloaking error.}
   \label{fig:single14_zoom}
@@ -878,24 +860,54 @@ over an octave-plus band rather than at one frequency only.
 
 \subsection{Floquet--Bloch dispersion}\label{subsec:bloch}
 
-To verify that the optimised broadband material is physically
-admissible we compute the Floquet--Bloch dispersion of a vertical
-strip unit cell cut through the optimised cloak, Bloch-periodic along
-the surface direction $x_1$, traction-free at the top and fixed at the
-bottom, following the construction used for the Rayleigh-wave
-benchmark~\citep{chatzopoulos2023}. Because the triangular
-transformation is invariant along $x_1$, the cell width is
-unconstrained. Figure~\ref{fig:bloch} reports the lowest surface
-branches over the reduced Brillouin zone $k_{x_1}\in(0,\pi/L_c]$.
-The dispersion is real-valued across the target band — the optimised
-cell supports propagating surface modes and does not rely on locally
-resonant bandgaps to suppress transmission-side amplitude.
+As an independent diagnostic, we compute the Floquet–Bloch dispersion spectra of a unit cell comprising the entire triangular cloak cross-section shown in Fig.~\ref{fig:setup}(b). The cell is Bloch-periodic along the surface
+direction $x_1$, traction-free at the top, and clamped at the bottom and is evaluated directly on the
+production FEM mesh. 
+Figure~\ref{fig:bloch} presents the resulting dispersion spectra for the uncloaked reference cell, the analytical transformation cloak, and the optimised ($14\times10$) neural-field cloak. Modes are classified using the inverse participation ratio (IPR)
+
+\begin{equation}
+\label{eq:ipr}
+\mathrm{IPR}
+=
+|\psi^\star|\,
+\frac{\sum_n A_n \lVert \mathbf{u}_n \rVert^4}
+{\left(\sum_n A_n \lVert \mathbf{u}_n \rVert^2\right)^2},
+\qquad
+\lVert \mathbf{u}_n \rVert^2
+=
+|u_{1,n}|^2 + |u_{2,n}|^2.
+\end{equation}
+where $A_n$ is the nodal area and $|\psi^\star| = \sum_n A_n$. Modes with
+$\mathrm{IPR}\geq2.5$ are identified as surface-localised and shown
+as large outlined markers, whereas the remaining bulk modes are
+shown as small dots. Marker colour represents the IPR. The analytical Rayleigh-wave branch, $f^\star=\xi$, folded at
+each Brillouin-zone boundary, is included as a dashed reference
+line.
+
+For each configuration, $50$ Bloch wavenumbers and $400$ eigenmodes
+were evaluated, giving $20{,}000$ modes per configuration. Within the range
+$f^\star\leq2.5$, the numbers of surface-localised modes are $768$,
+$725$, and $816$ for the reference, analytical-cloak, and
+optimised-cloak cells, respectively.
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.7\linewidth]{bloch_dispersion.png}
-  \caption{Floquet--Bloch dispersion of a vertical strip unit cell
-  through the broadband neural-field cloak, Bloch-periodic along the
-  surface direction. Shaded band is the broadband training target.}
+  \begin{subfigure}{0.49\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/dispersion_comparison.png}
+    \caption{Analytical transformation cloak}
+    \label{fig:bloch_analytical}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/dispersion_comparison_optimized.png}
+    \caption{Optimised ($14\times10$) neural-field cloak}
+    \label{fig:bloch_optimized}
+  \end{subfigure}
+  \caption{Floquet--Bloch dispersion diagrams for the full-cloak unit
+  cell described above. In each panel, the uncloaked reference cell
+  (diamonds) is compared with the corresponding cloak cell (circles with
+  black outlines): \textbf{(a)}~the analytical transformation cloak and
+  \textbf{(b)}~the optimised ($14\times10$) neural-field cloak.}
   \label{fig:bloch}
 \end{figure}
 
@@ -915,36 +927,70 @@ isotropic with $E=30\,\text{GPa}$, $\nu=0.2$ and
 $\rho=2300\,\text{kg}/\text{m}^3$ (plane strain), and the second phase is void;
 the cloak is cast into the soil half-space of
 Sec.~\ref{subsec:domain}. We first constrain the neural-field
-optimisation to the manifold of realisable microstructures, then compare two
-generative methods -- inverse design and conditional diffusion -- for turning
+optimisation to the manifold of realisable microstructures, then compare inverse design and conditional diffusion generative methods for turning
 each per-cell target into an actual microstructure, and finally exhibit and
 validate the realised cloak.
 
 \subsection{Pipeline}\label{subsec:micro_pipeline}
 
-\paragraph{Step 1 -- Microstructure dataset.} A catalogue of $N\sim10^{6}$
+\paragraph{Step 1 -- Microstructure dataset} A catalogue of $N\sim10^{6}$
 binary $50\times50$ unit cells is generated by a squared-assembly cellular
 automaton on a concrete/void substrate, following the cellular-automaton
 generative approach of \citet{nakarmi2024}, who assemble a large,
 topologically diverse library of mesostructures by evolving a pixel grid
-under neighbour-count birth/death/survival rules.
+under neighbour-count birth/death and survival rules.
 
-\paragraph{Step 2 -- Homogenisation.} Periodic-FEM homogenisation of each unique
-cell, with the solid pixels carrying the concrete moduli above and the void
-pixels an ersatz stiffness $10^{-6}E$, yields its effective orthotropic
-stiffness $(C_{11},C_{22},C_{12},C_{66})$ and density
-$\rho_{\mathrm{eff}}=v_f\rho_{\mathrm{concrete}}$. Because the squared-assembly cells are
+\paragraph{Step 2 -- Homogenisation} 
+
+% Periodic-FEM homogenisation of each unique
+% cell \textcolor{red}{TO DO: provide details or a reference}, with the solid pixels carrying the concrete moduli above and the void
+% pixels an ersatz stiffness $10^{-6}E$, yields its effective orthotropic
+% stiffness $(C_{11},C_{22},C_{12},C_{66})$ and density
+% $\rho_{\mathrm{eff}}=v_f\rho_{\mathrm{concrete}}$.
+
+Each unique cell is passed through standard
+asymptotic homogenisation under periodic boundary
+conditions~\citep{bendsoe1988,hassani1998,andreassen2014}, with the solid pixels
+carrying the concrete moduli above and the void pixels an ersatz stiffness
+$10^{-6}E$; the effective stiffness follows from the volume-averaged stress of
+the unit-cell problems, the periodic boundary conditions guaranteeing
+energetic consistency in the Hill--Mandel sense~\citep{hill1963}. The cell
+problems are solved with the same JAX-FEM solver~\citep{xu2020jaxfem} as the
+macro problem. Because the squared-assembly cells are
 invariant under the point group $D_2$, the homogenised tensor is exactly of the
-4CM form~\eqref{eq:4cm} that is the design variable throughout the paper, so the
-descriptor carries the full (orthotropic) stiffness rather than an isotropic
-projection of it.
+4CM form~\eqref{eq:4cm} that is the design variable throughout the paper, so the descriptor carries the full (orthotropic) stiffness rather than an isotropic projection of it.
 
-\paragraph{Step 3 -- Realisability prior.} A Gaussian mixture is fitted to the
-standardised $(\mbf{C}_{\mathrm{4CM}},\rho)$ point cloud of the catalogue, and a
-flat-top threshold $\tau$ at the $q$-th log-density quantile defines the
-realisable manifold $\mcl{M}$.
+\paragraph{Step 3 -- Realisability prior}
+A Gaussian mixture model (GMM) is fitted to the standardised
+$(\mbf{C}_{\mathrm{4CM}},\rho)$ point cloud of the catalogue. Denoting the
+standardised material descriptor by
+$\mbf{z}\in\mathbb{R}^{5}$, its probability density is
+\be\label{eq:gmm_density}
+  p_{\mathrm{GMM}}(\mbf{z})
+  =
+  \sum_{k=1}^{K}\pi_k\,
+  \mcl{N}\!\left(\mbf{z}\mid\boldsymbol{\mu}_k,\boldsymbol{\Sigma}_k\right),
+  \qquad
+  \sum_{k=1}^{K}\pi_k=1,
+\ee
+where $K$ is the number of mixture components, $\pi_k$ their weights, and
+$\boldsymbol{\mu}_k$ and $\boldsymbol{\Sigma}_k$ their means and covariance
+matrices, respectively~\citep{mclachlan2000}. The realisable manifold is then
+defined by a flat-top log-density threshold,
+\be\label{eq:gmm_manifold}
+  \mcl{M}
+  =
+  \left\{\mbf{z}:\log p_{\mathrm{GMM}}(\mbf{z})\ge\tau\right\},
+  \qquad
+  \tau
+  =
+  Q_q\!\left(
+    \left\{\log p_{\mathrm{GMM}}(\mbf{z}_n)\right\}_{n=1}^{N}
+  \right),
+\ee
+where $Q_q$ denotes the $q$-th empirical quantile over the catalogue.
 
-\paragraph{Step 4 -- Constrained optimisation.} The neural field of
+\paragraph{Step 4 -- Constrained optimisation} The neural field of
 Sec.~\ref{sec:method} is trained with the manifold penalty
 \be\label{eq:gmm_pen}
   \mcl{L}_{\mathrm{GMM}}
@@ -959,13 +1005,16 @@ to a finer $20\times15$ grid  which places exactly $100$ cells inside the
 cloak in the expectation that the extra per-cell freedom would let the
 constrained optimisation reach a good realisable solution more easily.
 
-\paragraph{Step 5 -- Microstructure realisation.} Each optimised per-cell target
+
+
+
+\paragraph{Step 5 -- Microstructure realisation} Each optimised per-cell target
 $(\mbf{C}_{\mathrm{4CM}},\rho)$ is turned into an explicit $50\times50$
 solid/void cell by one of the two generative methods of
 Sec.~\ref{subsec:micro_methods} (or a nearest-neighbour dataset baseline).
 
-\paragraph{Step 6 -- Evaluation.} The macro FEM is re-solved with every cloak
-cell carrying the homogenised stiffness of its realised microstructure, and the
+\paragraph{Step 6 -- Evaluation} The macro FEM is re-solved with every cloak
+cell carrying the homogenised stiffness and density of its realised microstructure, and the
 cloak ratio $\eta$~\eqref{eq:cloak_ratio} is recomputed.
 
 \subsection{Two realisation methods}\label{subsec:micro_methods}
@@ -974,8 +1023,8 @@ Both methods solve the same per-cell inverse problem -- given a target
 orthotropic stiffness and density, produce a binary $50\times50$ cell whose
 homogenisation reproduces it -- but approach it from opposite directions.
 
-\paragraph{Inverse design (neural field).} A coordinate network parameterises a
-continuous density field over the $50\times50$ cell; it is relaxed during
+\paragraph{Inverse design (neural field)} A coordinate network parameterises a
+continuous density field over the $50\times50$ cell. It is relaxed during
 training and driven to a binary pattern through a soft-to-hard schedule, with a
 connectivity penalty that suppresses disconnected concrete islands and floating
 voids. The cell's periodic-FEM homogenised stiffness is differentiable in the
@@ -983,7 +1032,7 @@ network weights, so the pattern is optimised directly against the per-cell targe
 error. The method is deterministic and returns a single, locally optimal cell for
 each target.
 
-\paragraph{Diffusion (conditional generative).} A conditional denoising diffusion
+\paragraph{Diffusion (conditional generative)} A conditional denoising diffusion
 model is trained on the catalogue to sample binary cells conditioned on a target
 $(\mbf{C}_{\mathrm{4CM}},\rho)$, following the guided-diffusion inverse-design
 approach of \citet{yang2024}. Because sampling is stochastic, $N$ candidates
@@ -1050,7 +1099,7 @@ diffusion holds $\eta\gtrsim0.93$ over $f^\star\in[1.8,2.2]$ and has the smalles
 mean in-band distortion ($\langle|1-\eta|\rangle=0.13$, against $0.17$ for
 inverse design and $0.25$ for nearest neighbour), so better per-cell realisation
 improves the cloak across the whole band, not only at $f^\star=2$. We note that a
-greedy per-cell hybrid --- picking, for each cell independently, whichever of the
+greedy per-cell hybrid  picking, for each cell independently, whichever of the
 two methods best matches that cell's target does \emph{not} beat diffusion
 ($\eta=0.95$): minimising per-cell stiffness error is not the same as maximising
 whole-cloak cloaking, because the ratio couples the cells through the shared wave
@@ -1104,15 +1153,15 @@ ideal tensor~\eqref{eq:Ceff}.
   \label{fig:micro_tiling}
 \end{figure}
 
-\paragraph{Pixel-level validation.} 
-
-TODO: Add pixel-level validation details.
+% \paragraph{Pixel-level validation} 
+% \textcolor{red}{TODO: Add pixel-level validation details.}
+In the homogenised model each unit cell is replaced by its effective stiffness tensor and density, so the cloak is a smoothly varying continuum in which the microstructure appears only through those constants. We then perform a FEM validation where the unit cells are placed into the cloak region at their physical size and mesh that geometry directly. The cement phase is discretised, with quadratic triangular elements, and the pores are cut out as traction-free holes. At the design frequency $f^* = 2.0$, the transmission ratio converges to 0.76.
 
 %% =============================================================
 \section{Discussion}\label{sec:discussion}
 %% =============================================================
 
-The three regimes above share a single architectural choice -- a
+    The three regimes above share a single architectural choice -- a
 coordinate-conditioned neural field on top of a differentiable FEM --
 and they show, in different forms, the same advantage over hand-crafted
 symmetrisation strategies. In the single-frequency case the network finds a low-distortion realisable
@@ -1131,33 +1180,17 @@ reflecting per-cell target-matching error rather than a hidden
 homogenisation gap, since the $D_2$-invariant cells carry the full
 orthotropic (4CM) stiffness.
 
-\paragraph{Limitations.} The cloak is discretised into square cells, each
-carrying a single homogenised material, so the piecewise-constant grid cannot
-follow arbitrary cloak interfaces exactly, and the microstructure pipeline
-is restricted to a two-phase (single-constituent and void) substrate described
-by a quasi-static homogenised stiffness. We also validate the realised cloak
-one cell at a time rather than by simulating the fully assembled
-microstructure: the cells are so fine relative to the wavelength that meshing
-every feature across the whole cloak is impractical, while that same scale
-separation is what makes the homogenised description reliable in the first
-place. A direct full-domain pixel simulation is left to future work
-(Sec.~\ref{sec:micro}).
 
-\paragraph{Future work.} The same differentiable pipeline, coupling a
+\paragraph{Future work} The same differentiable pipeline, coupling a
 neural field to a finite-element solver, applies to other Rayleigh-wave
 design problems beyond carpet cloaking, such as wave focusing,
 waveguiding, and vibration isolation, by changing only the objective. On
 the realisability side, we have already replaced the discrete database
 with a differentiable generative model of the realisable manifold,
-queried during optimisation (a guided diffusion model in the spirit
-of~\citet{yang2024}); this model still generates one unit cell at a
+queried during optimisation; this model still generates one unit cell at a
 time, and producing a full multiscale image of the cloak, where
 neighbouring cells connect and vary smoothly across the domain, is an
-open problem that may again be a good fit for diffusion models. Such a
-generator would also relax the square-cell grid used here, which cannot
-conform to the inclined cloak interfaces: laying cells out on a
-body-fitted mesh would let the microstructure follow the interfaces and
-remove a source of residual boundary distortion. Two further extensions
+open problem that may again be a good fit for diffusion models. Two further extensions
 stand out. Moving from the two-dimensional carpet
 cloak to a three-dimensional cloak; the differentiable JAX-FEM pipeline
 carries over, but the cost of the full solve grows sharply. And
@@ -1170,20 +1203,27 @@ quasi-static Cauchy one used here.
 \section{Conclusion}\label{sec:conclusion}
 %% =============================================================
 
-We have presented a unified, differentiable design pipeline for
-two-dimensional Rayleigh-wave carpet cloaks in which the per-cell
+We have presented a unified, differentiable design optimisation pipeline for
+2D Rayleigh-wave carpet cloaks in which the per-cell
 material is parameterised by four free orthotropic Cauchy moduli
 $(C_{11},C_{12},C_{22},C_{66})$ and a scalar density, searched by a
 coordinate-conditioned neural field through an end-to-end differentiable
 JAX-FEM pipeline. This is an alternative to closed-form arithmetic-mean
 symmetrisation of the ideal polar tensor that directly explores the
-realisable Cauchy design space; the ideal BGM transformation tensor (polar,
-ten components) is retained as the mathematical reference, while all
-optimised designs are Cauchy. The pipeline recovers near-perfect
-single-frequency cloaking, flattens the cloak loss across a target
-frequency band, and can be projected onto a realisability manifold and
-realised as explicit binary microstructures built from a single constituent 
-recovering approximately $97\%$ of the ideal cloaking performance.
+realisable Cauchy design space. The pipeline achieves near-perfect cloaking and flattens the cloak loss across the target frequency band. In a subsequent step, we have compared diffusion and neural-field optimisation for projecting these continuum targets onto a realisability manifold, with diffusion performing better, and when the selected microstructures are represented only through their homogenised effective stiffness and density, the resulting cloak retains a high performance of approximately $\eta=0.97$. Most importantly, direct FEM simulation of the fully resolved microstructured cloak still achieves approximately $\eta=0.76$, demonstrating that a substantial cloaking effect survives the transition from effective continuum properties to an explicit single-material architecture. This provides a practical route towards physically realisable Rayleigh-wave cloaks and further multiscale optimisation of their dynamic performance.
+
+
+
+
+
+% The pipeline recovers near-perfect
+% single-frequency cloaking, flattens the cloak loss across a target
+% frequency band, and can be projected onto a realisability manifold and
+% realised as explicit binary microstructures built from a single constituent 
+% recovering approximately $97\%$ of the ideal cloaking performance.
+% Most importantly, direct FEM simulation of the fully resolved microstructured cloak still achieves approximately $\eta=0.76$, demonstrating that a substantial cloaking effect survives the transition from effective continuum properties to an explicit single-material architecture. This provides a practical route towards physically realisable Rayleigh-wave cloaks and establishes a basis for further multiscale optimisation of their dynamic performance.
+
+
 
 %% Bibliography
 \bibliographystyle{elsarticle-num-names}
