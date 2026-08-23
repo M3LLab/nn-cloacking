@@ -43,6 +43,7 @@ from dataset.stiffness.calc_fem import (
     build_periodic_pmat,
     make_structured_tri_mesh,
 )
+from dataset.stiffness.calc_fem_hifi import make_structured_tri6_mesh
 from rayleigh_cloak.neural_reparam import (
     fourier_features,
     init_mlp,
@@ -344,6 +345,19 @@ class HomogSetup:
     simp_p: float
     rho_solid: float = RHO_CEMENT
     rho_void_ratio: float = 1e-6
+    ele_type: str = "TRI3"
+    mesh_N: int = 50
+    canvas_N: int = 50
+
+
+def _n_quad(mesh, ele_type: str) -> int:
+    """Number of quadrature points per element for this element type."""
+    from jax_fem.fe import FiniteElement
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        fe = FiniteElement(mesh=mesh, vec=2, dim=2, ele_type=ele_type,
+                           gauss_order=None, dirichlet_bc_info=None)
+    return int(np.asarray(fe.JxW).shape[1])
 
 
 def _qp_to_pixel(
@@ -352,7 +366,12 @@ def _qp_to_pixel(
     canvas_H: int,
     canvas_W: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Map TRI3 element centroids → pixel (row, col) in the (H, W) canvas.
+    """Map element centroids → pixel (row, col) in the (H, W) canvas.
+
+    Material is sampled pointwise at the element centroid, exactly as
+    ``calc_fem_hifi.compute_stiffness_hifi`` does — the mean over the element's
+    nodes, which for the structured TRI6 mesh equals the vertex centroid because
+    the midside nodes are exact edge midpoints.
 
     Image convention: row 0 = top = high y.
     Returns (row_idx, col_idx) each shaped (n_elems, 1) for broadcasting over n_qp.
@@ -373,6 +392,8 @@ def build_homog_setup(
     rho_solid: float = RHO_CEMENT,
     rho_void_ratio: float = 1e-6,
     nu: float = NU,
+    mesh_N: int | None = None,
+    ele_type: str = "TRI3",
     solver_opts: dict | None = None,
 ) -> HomogSetup:
     """Build mesh, 4 periodic homogenization problems, and ad_wrapper callables.
@@ -384,16 +405,34 @@ def build_homog_setup(
     simp_p        : SIMP penalization exponent
     E_void_ratio  : void/solid Young's modulus ratio (ersatz material)
     rho_void_ratio: void/solid density ratio
+    mesh_N        : FEM mesh resolution, decoupled from the pixel canvas;
+                    None → ``canvas_N`` (1 pixel = 1 mesh cell)
+    ele_type      : "TRI3" (linear) or "TRI6" (quadratic).  **The dataset is
+                    homogenised with TRI6 @ mesh_N=100**; linear TRI3 at 1
+                    element/pixel is over-stiff by 5–120 % depending on the
+                    component, so any design optimised against TRI3@50 will not
+                    reproduce its target under the dataset's own homogeniser.
+                    Use ``ele_type="TRI6", mesh_N=100`` to match it.
     solver_opts   : jax-fem solver options dict; default = {'umfpack_solver': {}}
     """
     if solver_opts is None:
         solver_opts = {"umfpack_solver": {}}
 
     omega = 2.0 * math.pi * f_star
+    mesh_N = canvas_N if mesh_N is None else int(mesh_N)
 
-    points, cells_np = make_structured_tri_mesh(canvas_N)
-    mesh = Mesh(points, cells_np, ele_type="TRI3")
-    P_mat = build_periodic_pmat(canvas_N, vec=2)
+    if ele_type == "TRI6":
+        points, cells_np = make_structured_tri6_mesh(mesh_N)
+        p_grid = 2 * mesh_N          # node grid is (2N+1)^2
+    elif ele_type == "TRI3":
+        points, cells_np = make_structured_tri_mesh(mesh_N)
+        p_grid = mesh_N
+    else:
+        raise ValueError(f"ele_type must be TRI3 or TRI6, got {ele_type!r}")
+
+    mesh = Mesh(points, cells_np, ele_type=ele_type)
+    P_mat = build_periodic_pmat(p_grid, vec=2)
+    n_qp = _n_quad(mesh, ele_type)
 
     def corner(pt):
         return jnp.isclose(pt[0], 0.0, atol=1e-5) & jnp.isclose(pt[1], 0.0, atol=1e-5)
@@ -404,15 +443,18 @@ def build_homog_setup(
         [lambda p: 0.0, lambda p: 0.0],
     ]
 
+    # (n_elems, 1) centroid → pixel, tiled over the element's quadrature points
+    # (material is piecewise constant per element, as in calc_fem_hifi).
     row_idx_np, col_idx_np = _qp_to_pixel(points, cells_np, canvas_N, canvas_N)
-    row_idx = jnp.array(row_idx_np)
-    col_idx = jnp.array(col_idx_np)
+    n_el = len(cells_np)
+    row_idx = jnp.array(np.broadcast_to(row_idx_np, (n_el, n_qp)).copy())
+    col_idx = jnp.array(np.broadcast_to(col_idx_np, (n_el, n_qp)).copy())
 
     fwd_preds: list[Any] = []
     problems: list[Any] = []
 
     for k, eps_mac in enumerate(_LOAD_CASES):
-        eps_qp = np.broadcast_to(eps_mac[None, None], (len(cells_np), 1, 2, 2)).copy()
+        eps_qp = np.broadcast_to(eps_mac[None, None], (n_el, n_qp, 2, 2)).copy()
 
         ProbCls = type(
             f"_DynHomog_{k}",
@@ -434,7 +476,7 @@ def build_homog_setup(
             mesh=mesh,
             vec=2,
             dim=2,
-            ele_type="TRI3",
+            ele_type=ele_type,
             dirichlet_bc_info=dirichlet_bc_info,
         )
         prob.P_mat = P_mat
@@ -457,6 +499,9 @@ def build_homog_setup(
         simp_p=simp_p,
         rho_solid=rho_solid,
         rho_void_ratio=rho_void_ratio,
+        ele_type=ele_type,
+        mesh_N=mesh_N,
+        canvas_N=canvas_N,
     )
 
 
@@ -666,6 +711,8 @@ def run_cell_design(
     step_callback=None,
     tol: float = 0.001,
     straight_through: bool = False,
+    stop_fn=None,
+    revert_on_blowup: float | None = None,
 ) -> CellDesignResult:
     """Optimize MLP weights to produce a cell matching ``target_flat4`` and ``target_rho``.
 
@@ -687,6 +734,22 @@ def run_cell_design(
     opt_state_init  : AdamState for warm restart; None → fresh
     step_callback   : optional callable(step, loss, flat4, rho, theta, opt_state)
     tol             : early-stop threshold on max relative error (default 0.001)
+    stop_fn         : optional callable(flat4, rho) -> bool evaluated in the
+                      hardened tail; True stops the run.  Use when the acceptance
+                      criterion is not "every component within ``tol``" — e.g.
+                      a distance in the dataset's rank space, where a large
+                      relative error on a component with little spread is
+                      harmless and a small one on a dense component is not.
+    revert_on_blowup: if set, any hardened step whose loss exceeds this multiple
+                      of the best loss so far is treated as a bad step: the
+                      weights and Adam moments are rolled back to the best
+                      snapshot and the learning rate is halved for the rest of
+                      the run.  With a binarised (straight-through) forward a
+                      single oversized step can flip a whole band of pixels at
+                      once and sever the load path — C11 dropping by 3-4 orders
+                      of magnitude — from which the relative-error landscape
+                      never recovers.  Recommended whenever
+                      ``straight_through`` is on.
     weight_conn     : weight for gate-to-gate connectivity loss (default 10.0); 0 → disabled
     conn_steps      : flood iterations for connectivity loss (default 100; ≥ grid diameter)
     beta_init       : initial Heaviside-projection sharpness (1.0 = plain sigmoid)
@@ -745,7 +808,9 @@ def run_cell_design(
         """
         if t_frac < beta_warmup_frac:
             return beta_init, False
-        r = (t_frac - beta_warmup_frac) / max(beta_ramp_frac, 1e-12)
+        if beta_ramp_frac <= 0.0:
+            return beta_final, True     # zero-length ramp: hardened from the start
+        r = (t_frac - beta_warmup_frac) / beta_ramp_frac
         if r >= 1.0:
             return beta_final, True
         return beta_init + (beta_final - beta_init) * r, False
@@ -756,6 +821,8 @@ def run_cell_design(
     conn_history: list[float] = []
     best_loss = float("inf")
     best_theta = jax.tree.map(jnp.copy, theta)
+    best_opt_state = opt_state
+    lr_scale = 1.0
 
     target_str = "[" + ", ".join(f"{float(v):.3e}" for v in target) + "]"
     rho_str = f"  rho_target={t_rho:.1f}" if use_rho else ""
@@ -772,6 +839,7 @@ def run_cell_design(
             cur_lr = lr_end + 0.5 * (lr - lr_end) * (1.0 + math.cos(math.pi * t_frac))
         else:
             cur_lr = lr + (lr_end - lr) * t_frac
+        cur_lr *= lr_scale
 
         cur_beta, hardened = _beta_at(t_frac)
         # Always treat the final step as hardened so best_theta is set even if
@@ -814,6 +882,16 @@ def run_cell_design(
         if hardened and loss_float < best_loss:
             best_loss = loss_float
             best_theta = jax.tree.map(jnp.copy, theta)
+            best_opt_state = opt_state
+        elif (hardened and revert_on_blowup is not None
+              and np.isfinite(best_loss)
+              and loss_float > revert_on_blowup * best_loss):
+            lr_scale *= 0.5
+            theta = jax.tree.map(jnp.copy, best_theta)
+            opt_state = best_opt_state
+            print(f"         blow-up ({loss_float:.3e} > {revert_on_blowup:g}x best "
+                  f"{best_loss:.3e}) — rolled back, lr x{lr_scale:.3g}")
+            continue
 
         if step_callback is not None:
             step_callback(step, loss_float, flat4_list, rho_float, theta, opt_state)
@@ -827,6 +905,9 @@ def run_cell_design(
             max_rel_err = max(max_rel_err, rel_err_rho)
         if hardened and max_rel_err < tol:
             print(f"  Early stop at step {step}: max rel err {max_rel_err:.2e} < tol {tol:.2e}")
+            break
+        if hardened and stop_fn is not None and stop_fn(np.array(flat4_list), rho_float):
+            print(f"  Early stop at step {step}: stop_fn satisfied")
             break
 
         updates, opt_state = adam_update(grads, opt_state, lr=cur_lr)
